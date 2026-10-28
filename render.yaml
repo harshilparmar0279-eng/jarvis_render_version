@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: jarvis-render-assistant
+    runtime: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements-render.txt
+    startCommand: python render_server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GEMINI_API_KEY
+        sync: false
