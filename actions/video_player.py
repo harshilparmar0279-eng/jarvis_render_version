@@ -183,6 +183,8 @@ def video_player(parameters: dict = None, response=None, player=None,
         was_opening = not player.video_is_playing()
         _begin_open()
         player.stop_video()
+        if hasattr(player, "restore_search_content"):
+            player.restore_search_content()
         if was_opening:
             return "Stopped it before it opened."
         return "Closed the video."
@@ -244,6 +246,8 @@ def _play_youtube(player, source: str, token: int) -> None:
         try:
             player.show_video(url, title or source, muted=False,
                               audio_source=audio_url)
+            if hasattr(player, "show_lyrics_track"):
+                player.show_lyrics_track(title or source)
             return
         except Exception as e:                              # noqa: BLE001
             err = str(e)

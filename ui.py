@@ -5062,6 +5062,10 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
+    _lyrics_open_sig   = pyqtSignal(str, str)          # (track_name, artist_name)
+    _lyrics_loaded_sig = pyqtSignal(object, str)       # (LyricsTrack, raw_query)
+    _lyrics_pos_sig    = pyqtSignal(float)             # position_sec
+    _lyrics_close_sig  = pyqtSignal()
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -5252,6 +5256,7 @@ class MainWindow(QMainWindow):
             self._video_player.setAudioOutput(self._video_audio)
             self._video_player.errorOccurred.connect(self._on_video_error)
             self._video_player.mediaStatusChanged.connect(self._on_video_media_status_changed)
+            self._video_player.positionChanged.connect(self._on_video_position_changed)
 
             # A SECOND player, for sound that arrives separately.
             #
@@ -5360,6 +5365,13 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
+        self._saved_search_title = ""
+        self._saved_search_text = ""
+        self._saved_search_visible = False
+        self._lyrics_open_sig.connect(self._on_lyrics_open)
+        self._lyrics_loaded_sig.connect(self._on_lyrics_loaded)
+        self._lyrics_pos_sig.connect(self._on_lyrics_pos)
+        self._lyrics_close_sig.connect(self.restore_search_content)
         self._cam_stop = threading.Event()
 
         # Camera preview overlay (child of central widget, positioned in resizeEvent)
@@ -5527,6 +5539,7 @@ class MainWindow(QMainWindow):
             self._set_muted(False, "Media finished — microphone restored.")
         else:
             self._sync_mic_for_video()      # gives the microphone back
+        self.restore_search_content()
         self.set_state("LISTENING")
 
     def _set_video_muted(self, muted: bool) -> None:
@@ -6738,11 +6751,10 @@ class MainWindow(QMainWindow):
         """)
         dismiss.clicked.connect(w.hide)
         hdr.addWidget(dismiss)
-        lay.addLayout(hdr)
 
         # ── separator ─────────────────────────────────────────────────────────
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {C.BORDER};"); lay.addWidget(sep)
+        sep.setStyleSheet(f"color: {C.BORDER};")
 
         # ── text display ──────────────────────────────────────────────────────
         self._content_display = QTextEdit()
@@ -6771,8 +6783,29 @@ class MainWindow(QMainWindow):
                 height: 0; border: none;
             }}
         """)
-        lay.addWidget(self._content_display)
 
+        # ── Stacked container: Search View (Page 0) & Spotify Lyrics (Page 1) ──
+        from PyQt6.QtWidgets import QStackedWidget
+        self._content_stack = QStackedWidget(w)
+
+        # Page 0: Search Results / Briefings View
+        search_widget = QWidget()
+        s_lay = QVBoxLayout(search_widget)
+        s_lay.setContentsMargins(0, 0, 0, 0)
+        s_lay.setSpacing(5)
+        s_lay.addLayout(hdr)
+        s_lay.addWidget(sep)
+        s_lay.addWidget(self._content_display)
+        self._content_stack.addWidget(search_widget)
+
+        # Page 1: Spotify-inspired glassmorphism live lyrics view
+        from ui_lyrics_panel import LyricsPanelWidget
+        self._lyrics_panel = LyricsPanelWidget()
+        self._lyrics_panel.dismiss_requested.connect(self.restore_search_content)
+        self._lyrics_panel.seek_requested.connect(self._on_lyrics_seek)
+        self._content_stack.addWidget(self._lyrics_panel)
+
+        lay.addWidget(self._content_stack)
         return w
 
     def _show_content(self, title: str, text: str):
@@ -6781,6 +6814,11 @@ class MainWindow(QMainWindow):
         # The panel opens below the head, so the head looks down at it. It is a
         # tiny thing that answers "did that land?" before you read a word.
         self.hud.glance(0.0, -0.85, hold=1.3)
+        self._saved_search_title = title
+        self._saved_search_text = text
+        self._saved_search_visible = True
+        if hasattr(self, "_content_stack"):
+            self._content_stack.setCurrentIndex(0)
         self._content_title_lbl.setText(title.upper()[:48])
         self._content_ts_lbl.setText(_time.strftime("%H:%M:%S"))
         self._content_display.setPlainText(text)
@@ -6814,6 +6852,51 @@ class MainWindow(QMainWindow):
     def _esc(s) -> str:
         return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace("\n", "<br>"))
+
+    def _on_lyrics_open(self, track_name: str, artist_name: str):
+        if not hasattr(self, "_content_stack") or not hasattr(self, "_lyrics_panel"):
+            return
+        self._content_stack.setCurrentIndex(1)
+        self._lyrics_panel.set_loading(track_name, artist_name)
+        first_show = not self._content_panel.isVisible()
+        self._content_panel.show()
+        if first_show:
+            total = self._center_split.height()
+            self._center_split.setSizes([max(total - 240, 120), 240])
+        self.hud.glance(0.0, -0.85, hold=1.3)
+
+        import threading
+        def _fetch():
+            from core.lyrics_engine import LRCLIBClient
+            track = LRCLIBClient.fetch_lyrics(track_name, artist_name)
+            self._lyrics_loaded_sig.emit(track, track_name)
+
+        threading.Thread(target=_fetch, daemon=True, name="lyrics-fetch").start()
+
+    def _on_lyrics_loaded(self, track, raw_query: str):
+        if hasattr(self, "_lyrics_panel"):
+            self._lyrics_panel.load_track(track, raw_query)
+
+    def _on_lyrics_pos(self, pos_sec: float):
+        if hasattr(self, "_lyrics_panel") and self._content_stack.currentIndex() == 1:
+            self._lyrics_panel.update_position(pos_sec)
+
+    def _on_video_position_changed(self, pos_ms: int):
+        self._lyrics_pos_sig.emit(pos_ms / 1000.0)
+
+    def _on_lyrics_seek(self, time_sec: float):
+        if hasattr(self, "_video_player") and self._video_player:
+            self._video_player.setPosition(int(time_sec * 1000))
+
+    def restore_search_content(self):
+        """Restore previous search results when music finishes or lyrics are dismissed."""
+        if getattr(self, "_saved_search_text", "") and getattr(self, "_saved_search_visible", False):
+            if hasattr(self, "_content_stack"):
+                self._content_stack.setCurrentIndex(0)
+            self._show_content(self._saved_search_title, self._saved_search_text)
+        else:
+            if hasattr(self, "_content_panel"):
+                self._content_panel.hide()
 
     def _show_review(self, title: str, summary: str, findings, unclear):
         """Slot — Qt main thread. Lays a document review into the content panel."""
@@ -8422,3 +8505,15 @@ class JarvisUI:
     def stop_speaking(self):
         if not self.muted:
             self.set_state("LISTENING")
+
+    def show_lyrics_track(self, track_name: str, artist_name: str = "") -> None:
+        """Thread-safe: display live synchronized lyrics in bottom-center panel."""
+        self._win._lyrics_open_sig.emit(str(track_name or ""), str(artist_name or ""))
+
+    def update_lyrics_position(self, pos_sec: float) -> None:
+        """Thread-safe: update lyrics playback position."""
+        self._win._lyrics_pos_sig.emit(float(pos_sec))
+
+    def restore_search_content(self) -> None:
+        """Thread-safe: restore previous search results when music finishes."""
+        self._win._lyrics_close_sig.emit()

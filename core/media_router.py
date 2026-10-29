@@ -224,7 +224,8 @@ def _resolve_video_id(query: str) -> Optional[str]:
     return None
 
 
-def execute_media_command(intent_data: dict, player=None) -> Tuple[bool, str, dict]:
+def execute_media_command(intent_data: dict, player=None) -> Tuple[bool, str, dict]:
+
     from core.command_lock import sync_command_mutex
     from core.command_lock import sync_command_mutex
     """
@@ -338,6 +339,11 @@ def execute_media_command(intent_data: dict, player=None) -> Tuple[bool, str, di
 
     if player:
         player.write_log(f"[Media] ✅ {resp_text}")
+        if query and hasattr(player, "show_lyrics_track"):
+            m = re.search(r"\b(?:by|singer)\s+([a-zA-Z\s]+)", query, re.I)
+            artist = m.group(1).strip() if m else ""
+            track = re.sub(r"\b(?:by|singer)\s+([a-zA-Z\s]+)", "", query, flags=re.I).strip()
+            player.show_lyrics_track(track or query, artist)
 
     result_data = {
         "status": "playing" if verified_playback else "opened",

@@ -380,6 +380,45 @@ def get_wake_word_enabled() -> bool:
     return load_api_keys().get("wake_word_enabled", False)
 
 
+def get_lyrics_mode() -> str:
+    """Return the lyrics display mode: 'auto', 'original', 'romanized', 'translation'."""
+    val = load_api_keys().get("lyrics_mode", "auto")
+    return val if val in ("auto", "original", "romanized", "translation") else "auto"
+
+
+def save_lyrics_mode(mode: str) -> None:
+    """Persist lyrics display mode to config."""
+    if mode not in ("auto", "original", "romanized", "translation"):
+        mode = "auto"
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["lyrics_mode"] = mode
+    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def get_roman_gujarati_enabled() -> bool:
+    """Return whether Roman Gujarati mode is enabled."""
+    return bool(load_api_keys().get("lyrics_roman_gujarati", False))
+
+
+def save_roman_gujarati_enabled(enabled: bool) -> None:
+    """Persist Roman Gujarati preference to config."""
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["lyrics_roman_gujarati"] = bool(enabled)
+    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def save_wake_word_enabled(enabled: bool) -> None:
     ensure_config_dir()
     data: dict = {}
