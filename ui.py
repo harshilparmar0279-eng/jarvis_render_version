@@ -380,6 +380,34 @@ class _SysMetrics:
         self._nv_unix   = None         # cached (lib, dev) for Linux/macOS NVML
         self._wmi_conn  = None         # cached WMI connection (creating one is slow)
         self._wmi_ok    = None         # None=untested, False=unavailable here
+
+        # Detect or load cached hardware capabilities (GPU & ACPI Temperature)
+        from memory.config_manager import get_hardware_caps, save_hardware_caps
+        caps = get_hardware_caps()
+        if caps is None:
+            # First launch probe: detect whether GPU and Temperature sensors physically exist
+            gpu_initial = self._probe_gpu()
+            temp_initial = self._probe_temp()
+            self._has_gpu = bool(gpu_initial >= 0.0)
+            self._has_temp = bool(temp_initial >= 0.0)
+            try:
+                save_hardware_caps({"has_gpu": self._has_gpu, "has_temp": self._has_temp})
+            except Exception:
+                pass
+        else:
+            self._has_gpu = bool(caps.get("has_gpu", False))
+            self._has_temp = bool(caps.get("has_temp", False))
+
+        if not self._has_gpu:
+            self._pynvml_ok = False
+            global _nvml_ok
+            _nvml_ok = False
+            self.gpu = -1.0
+
+        if not self._has_temp:
+            self._wmi_ok = False
+            self.tmp = -1.0
+
         t = threading.Thread(target=self._loop, daemon=True, name="sys-metrics-poller")
         t.start()
         ResourceGuardian.get_instance().register_worker("sys_metrics", "System & Process telemetry poller", thread_ref=t, is_essential=True)
@@ -464,7 +492,18 @@ class _SysMetrics:
             self.gpu = gpu
             self.tmp = tmp
 
+    def _probe_gpu(self) -> float:
+        return self._probe_gpu_internal()
+
+    def _probe_temp(self) -> float:
+        return self._probe_temp_internal()
+
     def _get_gpu(self) -> float:
+        if not getattr(self, "_has_gpu", True):
+            return -1.0
+        return self._probe_gpu_internal()
+
+    def _probe_gpu_internal(self) -> float:
         # pynvml — subprocess-free; initialise once and reuse the handle.
         # Re-initialising NVML on every poll is slow, so cache it and stop
         # retrying pynvml entirely once it proves unavailable here.
@@ -509,6 +548,11 @@ class _SysMetrics:
         return -1.0   # N/A — zero subprocess on all platforms
 
     def _get_temp(self) -> float:
+        if not getattr(self, "_has_temp", True):
+            return -1.0
+        return self._probe_temp_internal()
+
+    def _probe_temp_internal(self) -> float:
         # psutil — works on Linux; occasionally Windows with driver support
         try:
             temps = psutil.sensors_temperatures()
@@ -6032,20 +6076,22 @@ class MainWindow(QMainWindow):
         net_pct = min(100, net * 10)  # 10 MB/s = %100
         self._bar_net.set_value(net_pct, net_str)
 
-        # GPU
-        gpu = snap["gpu"]
-        if gpu >= 0:
-            self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
-        else:
-            self._bar_gpu.set_value(0, "N/A")
+        # GPU (only updated if physically available on this system)
+        if hasattr(self, "_bar_gpu") and getattr(_metrics, "_has_gpu", True):
+            gpu = snap["gpu"]
+            if gpu >= 0:
+                self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
+            else:
+                self._bar_gpu.set_value(0, "N/A")
 
-        # TMP
-        tmp = snap["tmp"]
-        if tmp >= 0:
-            tmp_pct = min(100, (tmp / 100) * 100)
-            self._bar_tmp.set_value(tmp_pct, f"{tmp:.0f}°C")
-        else:
-            self._bar_tmp.set_value(0, "N/A")
+        # TMP (only updated if physically available on this system)
+        if hasattr(self, "_bar_tmp") and getattr(_metrics, "_has_temp", True):
+            tmp = snap["tmp"]
+            if tmp >= 0:
+                tmp_pct = min(100, (tmp / 100) * 100)
+                self._bar_tmp.set_value(tmp_pct, f"{tmp:.0f}°C")
+            else:
+                self._bar_tmp.set_value(0, "N/A")
 
         try:
             boot_t  = psutil.boot_time()
@@ -6224,6 +6270,12 @@ class MainWindow(QMainWindow):
         for bar in [self._bar_cpu, self._bar_mem, self._bar_proc_ram, self._bar_net,
                     self._bar_gpu, self._bar_tmp]:
             lay.addWidget(bar)
+
+        # Permanently hide unavailable hardware bars (persists across all modes and future runs)
+        if not getattr(_metrics, "_has_gpu", True):
+            self._bar_gpu.hide()
+        if not getattr(_metrics, "_has_temp", True):
+            self._bar_tmp.hide()
 
         self._sparkline = ResourceSparkline(on_click=self._open_resource_diagnostics)
         lay.addWidget(self._sparkline)
@@ -7961,11 +8013,18 @@ class MainWindow(QMainWindow):
         is_eco = (clean == "low_ram")
         if hasattr(self, "_eco_panel") and self._eco_panel:
             self._eco_panel.setVisible(is_eco)
-        for b in [getattr(self, "_bar_cpu", None), getattr(self, "_bar_mem", None),
-                  getattr(self, "_bar_proc_ram", None), getattr(self, "_bar_net", None),
-                  getattr(self, "_bar_gpu", None), getattr(self, "_bar_tmp", None)]:
+        has_gpu = getattr(_metrics, "_has_gpu", True)
+        has_temp = getattr(_metrics, "_has_temp", True)
+        for b, avail in [
+            (getattr(self, "_bar_cpu", None), True),
+            (getattr(self, "_bar_mem", None), True),
+            (getattr(self, "_bar_proc_ram", None), True),
+            (getattr(self, "_bar_net", None), True),
+            (getattr(self, "_bar_gpu", None), has_gpu),
+            (getattr(self, "_bar_tmp", None), has_temp),
+        ]:
             if b:
-                b.setVisible(not is_eco)
+                b.setVisible((not is_eco) and avail)
         if hasattr(self, "_sparkline") and self._sparkline:
             self._sparkline.setVisible(not is_eco)
             self._sparkline.setEnabled(not is_eco)

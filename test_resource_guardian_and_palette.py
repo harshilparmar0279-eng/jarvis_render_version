@@ -314,5 +314,21 @@ class TestUIOverlayIntegration(unittest.TestCase):
         self.assertEqual(cmd_ov._list.count(), 1)
 
 
+
+class TestHardwareCapabilities(unittest.TestCase):
+    def test_save_and_get_hardware_caps(self):
+        from memory.config_manager import get_hardware_caps, save_hardware_caps
+        initial = get_hardware_caps()
+        try:
+            save_hardware_caps({"has_gpu": False, "has_temp": False})
+            caps = get_hardware_caps()
+            self.assertIsNotNone(caps)
+            self.assertFalse(caps["has_gpu"])
+            self.assertFalse(caps["has_temp"])
+        finally:
+            if initial is not None:
+                save_hardware_caps(initial)
+
+
 if __name__ == "__main__":
     unittest.main()

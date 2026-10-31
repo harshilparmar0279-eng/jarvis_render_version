@@ -997,3 +997,20 @@ def get_voice_speed() -> float:
         except (ValueError, TypeError):
             pass
     return 1.0
+
+
+def get_hardware_caps() -> dict | None:
+    """Return cached hardware capabilities dict (e.g. {'has_gpu': False, 'has_temp': False}) or None."""
+    data = load_api_keys()
+    caps = data.get("hardware_caps")
+    if isinstance(caps, dict):
+        return caps
+    return None
+
+
+def save_hardware_caps(caps: dict) -> None:
+    """Persist detected hardware capabilities to config."""
+    ensure_config_dir()
+    data = load_api_keys()
+    data["hardware_caps"] = dict(caps)
+    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
