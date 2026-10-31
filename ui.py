@@ -5150,6 +5150,7 @@ class MainWindow(QMainWindow):
         # can never be on screen at once.
         self._video_split = False        # is the sound a separate stream?
         self._video_auto_muted = False   # did JARVIS close the mic, or the user?
+        self._video_auto_gated = False   # is mic auto-gated for media playback?
         # A plain flag rather than reading the widget. video_is_playing() is
         # called from plugin threads, and reading a widget's state from one is
         # not something to rely on; an attribute is.
@@ -5512,11 +5513,13 @@ class MainWindow(QMainWindow):
         self._video_split = False
         self._video_on = False
         self._hud_cam_stack.setCurrentIndex(0)
-        if self._video_auto_muted:
+        if getattr(self, "_video_auto_muted", False):
             self._video_auto_muted = False
             self._set_muted(False, "Media finished — microphone restored.")
-        else:
-            self._sync_mic_for_video()      # gives the microphone back
+        if getattr(self, "_video_auto_gated", False):
+            self._video_auto_gated = False
+            self.write_log("SYS: Media finished — standard microphone restored.")
+        self._sync_mic_for_video()
         self.restore_search_content()
         self.set_state("LISTENING")
 
@@ -5535,30 +5538,29 @@ class MainWindow(QMainWindow):
     def _on_video_mute(self, muted: bool) -> None:
         self._set_video_muted(muted)
 
+    def is_media_playing(self) -> bool:
+        """Returns True if video or music is actively playing with sound output."""
+        try:
+            if getattr(self, "_video_on", False):
+                from PyQt6.QtMultimedia import QMediaPlayer
+                aud = self._video_sound_out if self._video_split else self._video_audio
+                sound_on = bool(aud and not aud.isMuted())
+                if sound_on and self._video_player and self._video_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _sync_mic_for_video(self) -> None:
-        """Close the microphone while the video is making sound.
-
-        JARVIS subtracts its OWN output from the microphone — that is what
-        core/echo.py does — but a video plays through a different output
-        entirely, so the guard has never heard of it and the assistant answers
-        the film. There is no arrangement in which an open microphone and a
-        loudspeaker in the same room do not do that.
-
-        So the microphone closes for exactly as long as the sound is on, and
-        opens again by itself the moment it goes off or the video is closed.
-        Only if JARVIS closed it: a microphone the user muted themselves stays
-        muted, and pressing the mute key during a video hands the decision back
-        to them for good.
-        """
+        """Coordinate smart mic gating during media playback to save tokens."""
         aud = self._video_sound_out if self._video_split else self._video_audio
         sound_on = bool(self._video_on and aud and not aud.isMuted())
-        if sound_on and not self._muted:
-            self._video_auto_muted = True
-            self._set_muted(True, "The video's sound is on — silence it, close "
-                                  "it, or press F4 to talk. Typing still works.")
-        elif not sound_on and self._video_auto_muted:
-            self._video_auto_muted = False
-            self._set_muted(False, "The video is quiet again.")
+        if sound_on and not getattr(self, "_video_auto_gated", False):
+            self._video_auto_gated = True
+            self.write_log("SYS: Music playing — mic auto-gated to save tokens (hold Ctrl+Space to speak).")
+        elif not sound_on and getattr(self, "_video_auto_gated", False):
+            self._video_auto_gated = False
+            self.write_log("SYS: Media quiet — standard microphone restored.")
 
     def _sync_video_sound(self) -> None:
         """Keep the separate soundtrack in step with the picture.
@@ -8591,6 +8593,13 @@ class JarvisUI:
 
     def video_is_playing(self) -> bool:
         return bool(self._win.video_is_playing())
+
+    def is_media_playing(self) -> bool:
+        """Thread-safe: True if video or music is actively playing with sound."""
+        try:
+            return bool(self._win.is_media_playing())
+        except Exception:
+            return False
 
     def start_camera_stream(self) -> None:
         """Thread-safe: start live camera feed in the full HUD area."""

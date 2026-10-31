@@ -746,9 +746,8 @@ class JarvisLive:
         self._wake_detector: WakeWordDetector | None = None
         self._wake_sleep_timeout = WAKE_SLEEP_TIMEOUT
 
-        # Restore the saved push-to-talk preference. Doing it here rather than
-        # in __init__ means the hotkey thread only exists once there is a
-        # session to talk to.
+        # Initialize hotkey listener so Ctrl+Space is globally available
+        self._ensure_ptt()
         if get_push_to_talk_enabled():
             try:
                 self.set_push_to_talk(True)
@@ -1046,21 +1045,23 @@ class JarvisLive:
         except Exception:
             return 1.0
 
+    def _ensure_ptt(self) -> None:
+        if getattr(self, "_ptt", None) is None:
+            try:
+                from core.hotkey import PushToTalk
+                self._ptt = PushToTalk(self._on_ptt)
+                self._ptt.start()
+            except Exception as e:
+                print(f"[JARVIS] ⚠ PTT listener initialization: {e}")
+
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
-        from core.hotkey import PushToTalk
-
         self._ptt_enabled = bool(enabled)
         self._ptt_held = False
+        self._ensure_ptt()
         if not enabled:
-            if self._ptt is not None:
-                self._ptt.stop()
-                self._ptt = None
             return "off"
-
-        if self._ptt is None:
-            self._ptt = PushToTalk(self._on_ptt)
-        scope = self._ptt.start()
+        scope = getattr(self._ptt, "scope", "global")
         # A window-scoped chord is a real limitation, not a detail — say it once
         # in the log so nobody wonders why it does nothing while another app is
         # focused. Reporting it must never be able to undo the thing it reports.
@@ -1738,13 +1739,24 @@ class JarvisLive:
             elif self._echo._hist:
                 self._echo.reset()
 
-            # ── Push-to-talk ─────────────────────────────────────────────────
-            # When it is on the microphone is closed by default and the chord
-            # opens it, which is the whole point: nothing leaves the machine
-            # unless you are holding the key.
+            # ── Push-to-talk & Smart Music Mic-Gating ───────────────────────
+            # 1. When global PTT is enabled, microphone is closed unless chord is held.
             if self._ptt_enabled and not self._ptt_held:
                 return
-            
+
+            # 2. Smart Music Mic-Gating: While music/video is playing through the speakers,
+            # auto-gate mic audio to avoid burning ~1,800 tokens/min on ambient song lyrics,
+            # UNLESS user explicitly holds Push-to-Talk (Ctrl+Space) to speak to JARVIS!
+            if not self._ptt_held:
+                is_media = False
+                try:
+                    if hasattr(self, "ui") and hasattr(self.ui, "is_media_playing"):
+                        is_media = self.ui.is_media_playing()
+                except Exception:
+                    pass
+                if is_media:
+                    return
+
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
                 loop.call_soon_threadsafe(self._enqueue_mic_audio, data)
