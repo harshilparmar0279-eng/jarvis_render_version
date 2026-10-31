@@ -155,12 +155,14 @@ PROVIDER_PREFIX = "prov:"
 # cooldown after one attempt instead of being paid for on every call.
 _LADDERS = {
     FAST: (LIVE,
+           "gemini-3.8-flash",
+           "gemini-3.5-flash",
            "gemini-3.5-flash-lite",
            "gemini-3.1-flash-lite", "gemini-flash-lite-latest",
-           "gemini-3.8-flash", "gemini-3.5-flash",
            "gemini-3.6-flash", "gemini-3-flash-preview"),
     SMART: (LIVE,
-            "gemini-3.8-flash", "gemini-3.5-flash",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
             "gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-latest"),
@@ -186,13 +188,14 @@ _LADDERS = {
 # survivable — the connect loop drops the tuning and proactive-audio fields and
 # reconnects when the server rejects them.
 LIVE_MODELS = (
+    "models/gemini-3.8-live-preview",
     "models/gemini-3.1-flash-live-preview",
     "models/gemini-2.5-flash-native-audio-preview-12-2025",
 )
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
 # only the fallback for when this module is imported without it (tests).
-_LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
+_LIVE_FALLBACK = "models/gemini-3.8-live-preview"
 
 # How many one-shot Live sessions may exist at once.
 #
@@ -259,7 +262,8 @@ def _cool(model: str, seconds: float = _COOLDOWN_SECONDS) -> None:
 
 
 def is_quota_error(err: str) -> bool:
-    return "429" in err or "RESOURCE_EXHAUSTED" in err
+    low = err.lower()
+    return "429" in err or "resource_exhausted" in low or "quota" in low or "rate limit" in low or "tokens per minute" in low
 
 
 def is_unavailable_error(err: str) -> bool:
