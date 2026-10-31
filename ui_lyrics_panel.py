@@ -79,6 +79,17 @@ class ConstellationLyricsWidget(QWidget):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._on_anim_tick)
 
+    def apply_resource_profile(self, profile: str) -> None:
+        """Dynamic background star trimming based on active resource profile."""
+        from core.resource_guardian import PROFILE_LOW_RAM, PROFILE_BALANCED
+        if profile == PROFILE_LOW_RAM:
+            self._bg_stars_count = 15
+        elif profile == PROFILE_BALANCED:
+            self._bg_stars_count = 35
+        else:
+            self._bg_stars_count = 60
+        self.update()
+
     def set_theme(self, pri_hex: str, is_black: bool = True):
         self._pri_color = QColor(pri_hex)
         self._is_black_theme = is_black
@@ -277,7 +288,8 @@ class ConstellationLyricsWidget(QWidget):
 
         # Ambient background micro-stars
         p.setPen(Qt.PenStyle.NoPen)
-        for sx, sy, sz, sa in self._bg_stars:
+        limit = getattr(self, "_bg_stars_count", len(self._bg_stars))
+        for sx, sy, sz, sa in self._bg_stars[:limit]:
             p.setBrush(QBrush(QColor(220, 255, 230, sa)))
             p.drawEllipse(QPointF(sx * W, sy * H), sz / 2.0, sz / 2.0)
 
@@ -799,6 +811,11 @@ class LyricsPanelWidget(QWidget):
         self._placeholder_lbl.hide()
         layout.addWidget(self._placeholder_lbl)
 
+    def apply_resource_profile(self, profile: str) -> None:
+        """Dynamic resource trimming for constellation stars and animations."""
+        if hasattr(self, "_constellation"):
+            self._constellation.apply_resource_profile(profile)
+
     def _cycle_view_mode(self):
         if self._view_mode == "constellation":
             self._view_mode = "reel"
@@ -994,10 +1011,18 @@ class LyricsPanelWidget(QWidget):
         target_val = widget_pos - (viewport_height // 2)
         target_val = max(0, min(target_val, scroll_bar.maximum()))
 
+        from core.resource_guardian import ResourceGuardian
+        dur = ResourceGuardian.get_instance().get_anim_duration_ms()
+        if dur == 0:
+            if getattr(self, "_scroll_anim", None):
+                self._scroll_anim.stop()
+            scroll_bar.setValue(target_val)
+            return
+
         if getattr(self, "_scroll_anim", None):
             self._scroll_anim.stop()
         self._scroll_anim = QPropertyAnimation(scroll_bar, b"value", self)
-        self._scroll_anim.setDuration(130)  # Snappy, agile OutQuad easing
+        self._scroll_anim.setDuration(dur)  # Dynamic agile easing: 0ms (low_ram), 90ms (balanced), 130ms (full)
         self._scroll_anim.setStartValue(scroll_bar.value())
         self._scroll_anim.setEndValue(target_val)
         self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutQuad)

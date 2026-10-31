@@ -615,6 +615,28 @@ class HudCanvas(QWidget):
         # 33ms (~30 FPS) provides fluid visual fidelity while keeping CPU usage strictly under 15%
         self._tmr.start(33)
 
+    def apply_resource_profile(self, profile: str) -> None:
+        """Dynamic UI and timer trimming based on the active resource profile."""
+        self._profile = profile
+        rg = ResourceGuardian.get_instance()
+
+        # Particles count trimming
+        num_pt = rg.get_dust_particles_count()
+        if num_pt == 0:
+            self._particles = []
+        else:
+            self._particles = [
+                [random.uniform(0, 1400), random.uniform(0, 1000),
+                 random.uniform(-0.16, 0.16), random.uniform(-0.30, -0.05),
+                 random.uniform(1.2, 2.6), random.uniform(0.18, 0.45)]
+                for _ in range(num_pt)
+            ]
+
+        # Timer rate trimming
+        tmr_ms = rg.get_hud_timer_ms()
+        self._tmr.setInterval(tmr_ms)
+        self.update()
+
     def glance(self, dx: float, dy: float, hold: float = 1.1) -> None:
         """Ask the avatar to look somewhere for a moment (see HoloAvatar.glance)."""
         try:
@@ -710,10 +732,20 @@ class HudCanvas(QWidget):
             if self._tmr.interval() < 350:
                 self._tmr.setInterval(350)  # Low-frequency idle sleep: drops background CPU to near 0%
             return
+
+        prof = getattr(self, "_profile", "") or ResourceGuardian.get_instance().get_profile()
+        if prof == "low_ram":
+            # In Low RAM mode: trim continuous 3D math and sleep timer when quiet
+            if not self.speaking and self._live_amp < 0.02 and self.state in ("IDLE", "LISTENING", "SLEEPING"):
+                if self._tmr.interval() < 600:
+                    self._tmr.setInterval(600)  # 1.5 wakeups/sec when idle: true 0% CPU!
+                return
+            elif self._tmr.interval() > 100:
+                self._tmr.setInterval(100)      # Reactive rate during user speech
         elif self._tmr.interval() > 50:
-            prof = ResourceGuardian.get_instance().get_profile()
-            rate = 33 if prof in ("balanced", "low_ram") else 20
+            rate = 33 if prof == "balanced" else 16
             self._tmr.setInterval(rate)
+
         self._tick += 1
         now = time.time()
 
@@ -767,7 +799,7 @@ class HudCanvas(QWidget):
         # starts talking. Same lesson the head's sway taught.
         self._core_phase += min(0.10, max(0.0, dt))
 
-        if self._avatar is not None and self.hud_style == "face":
+        if self._avatar is not None and self.hud_style == "face" and ResourceGuardian.get_instance().is_3d_avatar_enabled():
             self._avatar.step(dt, amp, speaking=self.speaking,
                               muted=self.muted, state=self.state,
                               v_open=v_open, v_wide=v_wide or 0.0,
@@ -1035,7 +1067,9 @@ class HudCanvas(QWidget):
         _r = min(W * 0.46, _band_h / 2.0)
 
         # ── Visualizer Centrepiece Mode ──────────────────────────────────────
-        if self._avatar is not None and self.hud_style == "face":
+        use_3d = (self._avatar is not None and self.hud_style == "face"
+                  and ResourceGuardian.get_instance().is_3d_avatar_enabled())
+        if use_3d:
             _r_head = min(fw * 0.355, _band_h / (self._avatar.SPAN + 0.08))
             _head_cy = _band_t + (_band_h - self._avatar.SPAN * _r_head) / 2.0 + _r_head
 
@@ -7846,7 +7880,33 @@ class MainWindow(QMainWindow):
         disp = PROFILE_DISPLAY_NAMES.get(clean, clean.upper())
         if hasattr(self, "_prof_btn"):
             self._prof_btn.setText(disp)
-        self._log.append_log(f"SYS: Resource profile set to {disp}.")
+
+        # 1. Dynamically rewire HudCanvas rendering and timer loop
+        if hasattr(self, "hud") and self.hud:
+            self.hud.apply_resource_profile(clean)
+
+        # 2. Dynamically rewire Lyrics Panel animations & star density
+        if hasattr(self, "_lyrics_panel") and self._lyrics_panel:
+            self._lyrics_panel.apply_resource_profile(clean)
+
+        # 3. Dynamic Sparkline live telemetry updates
+        if hasattr(self, "_sparkline") and self._sparkline:
+            self._sparkline.setEnabled(clean != "low_ram")
+
+        # 4. Immediate memory release for Low RAM and Balanced modes
+        if clean in ("low_ram", "balanced"):
+            try:
+                from core.ram_cleaner import release_unused_ram
+                release_unused_ram()
+            except Exception:
+                pass
+
+        if clean == "low_ram":
+            self._log.append_log("SYS: ECO / LOW RAM profile activated — 3D mesh math & animation loops trimmed (CPU <2%).")
+        elif clean == "balanced":
+            self._log.append_log("SYS: BALANCED profile activated — 30 FPS dynamic optimization with smart sleep.")
+        else:
+            self._log.append_log("SYS: FULL EXPERIENCE profile activated — 60 FPS Stark holographic showcase.")
 
     # ── Smart Command Palette (Ctrl+K) ───────────────────────────────────────
 

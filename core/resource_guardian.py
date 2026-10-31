@@ -397,3 +397,27 @@ class ResourceGuardian:
         elif prof == PROFILE_BALANCED:
             return 48  # Balanced: smooth wave animation with low CPU/RAM
         return 72      # Full Experience: 72 steps
+
+    def get_hud_timer_ms(self) -> int:
+        prof = self.get_profile()
+        if prof == PROFILE_LOW_RAM:
+            return 100  # Low RAM: 10 Hz event-driven rate
+        elif prof == PROFILE_BALANCED:
+            return 33   # Balanced: 30 FPS fluid rendering
+        return 16       # Full Experience: 60 FPS high-refresh rate
+
+    def is_3d_avatar_enabled(self) -> bool:
+        prof = self.get_profile()
+        return prof != PROFILE_LOW_RAM
+
+    def get_anim_duration_ms(self) -> int:
+        prof = self.get_profile()
+        if prof == PROFILE_LOW_RAM:
+            return 0    # Instant snappy cuts (0ms CPU animation cost)
+        elif prof == PROFILE_BALANCED:
+            return 90
+        return 130
+
+    def is_sparkline_live_enabled(self) -> bool:
+        prof = self.get_profile()
+        return prof != PROFILE_LOW_RAM
