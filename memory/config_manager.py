@@ -419,6 +419,49 @@ def save_roman_gujarati_enabled(enabled: bool) -> None:
     CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def get_lyrics_view_mode() -> str:
+    """Return lyrics layout view: 'constellation' or 'reel'."""
+    val = load_api_keys().get("lyrics_view_mode", "constellation")
+    return val if val in ("constellation", "reel") else "constellation"
+
+
+def save_lyrics_view_mode(mode: str) -> None:
+    """Persist lyrics layout view to config."""
+    if mode not in ("constellation", "reel"):
+        mode = "constellation"
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["lyrics_view_mode"] = mode
+    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def get_spotify_sp_dc() -> str:
+    """Return the user's Spotify sp_dc cookie for official color-lyrics access."""
+    import os
+    env_val = os.getenv("SPOTIFY_SP_DC", "")
+    if env_val:
+        return env_val.strip()
+    return str(load_api_keys().get("spotify_sp_dc", "") or "").strip()
+
+
+def save_spotify_sp_dc(cookie: str) -> None:
+    """Persist user's Spotify sp_dc cookie."""
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["spotify_sp_dc"] = str(cookie or "").strip()
+    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def save_wake_word_enabled(enabled: bool) -> None:
     ensure_config_dir()
     data: dict = {}
@@ -440,15 +483,13 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
-HUD_STYLES = ("face", "core", "quantum", "neural")
+HUD_STYLES = ("face", "core")
 
 
 def get_hud_style() -> str:
     """Which centrepiece the HUD draws:
     - face: 3D animated holographic wireframe head
     - core: Stark Arc Reactor with revolving sweep arcs
-    - quantum: 3D orbital quantum energy sphere with floating particles
-    - neural: Cyberpunk neural wave with harmonic audio ribbons
     """
     v = str(load_api_keys().get("hud_style", "face")).strip().lower()
     return v if v in HUD_STYLES else "face"

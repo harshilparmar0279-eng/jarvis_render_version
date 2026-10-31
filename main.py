@@ -1140,7 +1140,10 @@ class JarvisLive:
                 self._engine.interrupt()
             except Exception:
                 pass
-        self.ui.write_log("SYS: Interrupted — listening...")
+        now = time.monotonic()
+        if now - getattr(self, "_last_interrupt_log", 0.0) >= 3.0:
+            self._last_interrupt_log = now
+            self.ui.write_log("SYS: Interrupted — listening...")
 
     def speak_fast(self, text: str, voice: str = ""):
         """Ultra-fast, low-RAM edge-tts voice reply with pygame playback."""
@@ -1688,10 +1691,18 @@ class JarvisLive:
                 lvl = _pcm_level(indata)
                 is_user = False
                 try:
+                    # Require calibrated echo model and at least 7 sustained blocks (~140ms)
+                    # of genuine non-echo user speech. Never trigger barge-in purely based
+                    # on speaker volume > 0.20 when uncalibrated, which was interrupting JARVIS's
+                    # own voice through external speakers.
                     if lvl > 0.08:
-                        if self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, lvl) or (lvl > 0.20 and not self._echo.calibrated):
+                        if self._echo.calibrated and self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, lvl):
                             self._barge_blocks = getattr(self, "_barge_blocks", 0) + 1
-                            if self._barge_blocks >= 2:
+                            if self._barge_blocks >= 7:
+                                is_user = True
+                        elif not self._echo.calibrated and lvl > 0.40:
+                            self._barge_blocks = getattr(self, "_barge_blocks", 0) + 1
+                            if self._barge_blocks >= 10:
                                 is_user = True
                         else:
                             self._barge_blocks = max(0, getattr(self, "_barge_blocks", 0) - 1)
@@ -2064,17 +2075,18 @@ class JarvisLive:
             st.start()
             return st
 
+        stream = None
         try:
             stream = _open_spk(_spk_dev)
         except Exception as _e:
-            # A chosen output that the host API accepts by name but refuses to
-            # open (exclusive mode, wrong sample rate, device asleep) must not
-            # cost the user their voice. Fall back to the default and say so.
-            if _spk_dev is None:
-                raise
-            print(f"[JARVIS] ⚠️  Output device '{_spk_name}' failed: {_e} — using default")
-            self.ui.write_log(f"SYS: Speaker '{_spk_name}' unavailable — using system default.")
-            stream = _open_spk(None)
+            print(f"[JARVIS] ⚠️ Output device '{_spk_name}' failed: {_e} — attempting default")
+            try:
+                stream = _open_spk(None)
+                self.ui.write_log(f"SYS: Speaker '{_spk_name}' unavailable — using system default.")
+            except Exception as _e2:
+                print(f"[JARVIS] ⚠️ Default speaker also failed: {_e2}")
+                self.ui.write_log("SYS: Audio output device unavailable — running in silent output mode.")
+                stream = None
 
         # Ask the device how far behind the speakers actually are, rather than
         # assuming. This is what the echo tail is sized from, so a machine with a
@@ -2179,17 +2191,34 @@ class JarvisLive:
                     pass
 
                 try:
-                    if not self._interrupted:
+                    if not self._interrupted and stream is not None:
                         await asyncio.to_thread(stream.write, pcm.tobytes())
                 except (RuntimeError, asyncio.CancelledError):
                     break   # executor shutting down — exit cleanly
+                except Exception as _play_err:
+                    print(f"[JARVIS] ⚠️ Audio playback device error: {_play_err} — attempting stream recovery")
+                    try:
+                        if stream:
+                            stream.stop()
+                            stream.close()
+                    except Exception:
+                        pass
+                    stream = None
+                    try:
+                        stream = _open_spk(None)
+                        print("[JARVIS] 🔊 Default audio output stream recovered successfully")
+                    except Exception:
+                        pass
         except Exception as e:
-            print(f"[JARVIS] ❌ Play: {e}")
-            raise
+            print(f"[JARVIS] ❌ Play stream error: {e}")
         finally:
             self.set_speaking(False)
-            stream.stop()
-            stream.close()
+            if stream:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 

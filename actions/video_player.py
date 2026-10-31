@@ -69,7 +69,7 @@ def _local_path(text: str) -> str:
     return ""
 
 
-def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
+def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str, dict]:
     """(video_url, audio_url, title, error). Needs yt-dlp; says so when absent.
 
     TWO urls, because YouTube no longer offers one.
@@ -101,9 +101,9 @@ def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
         if info and info.get("entries"):
             info = info["entries"][0]
         if not info:
-            return "", "", "", "nothing was found for that."
+            return "", "", "", "nothing was found for that.", {}
     except Exception as e:
-        return "", "", "", f"the video could not be resolved: {e}"
+        return "", "", "", f"the video could not be resolved: {e}", {}
 
     formats = [f for f in (info.get("formats") or [])
                if str(f.get("protocol") or "").startswith("http") and f.get("url")]
@@ -137,13 +137,17 @@ def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
     # cannot drift. Then picture and sound separately.
     combined = best([f for f in formats if has(f, "vcodec") and has(f, "acodec")])
     if combined:
-        return combined["url"], "", info.get("title") or "", ""
+        return combined["url"], "", info.get("title") or "", "", info
 
-    # 720p is the ceiling on purpose: the HUD panel is nowhere near 4K, and a
-    # smaller stream starts sooner and drifts less.
+    # 480p/720p ceiling: the HUD panel is compact, and a lighter stream
+    # starts instantly, uses dramatically less CPU to decode, and avoids frame lag.
     video = best([f for f in formats
                   if has(f, "vcodec") and not has(f, "acodec")
-                  and f.get("ext") == "mp4" and (f.get("height") or 0) <= 720])
+                  and f.get("ext") == "mp4" and (f.get("height") or 0) <= 480])
+    if not video:
+        video = best([f for f in formats
+                      if has(f, "vcodec") and not has(f, "acodec")
+                      and f.get("ext") == "mp4" and (f.get("height") or 0) <= 720])
     if not video:
         video = best([f for f in formats
                       if has(f, "vcodec") and not has(f, "acodec")])
@@ -155,11 +159,11 @@ def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
                       if has(f, "acodec") and not has(f, "vcodec")])
 
     if not video:
-        return "", "", "", "no playable stream was offered for that video."
+        return "", "", "", "no playable stream was offered for that video.", {}
     if audio and audio.get("language"):
         print(f"[Video] audio track: {audio.get('language')} "
               f"({audio.get('format_note') or audio.get('format_id')})")
-    return video["url"], (audio or {}).get("url", ""), info.get("title") or "", ""
+    return video["url"], (audio or {}).get("url", ""), info.get("title") or "", "", info
 
 
 def _search_page(query: str) -> str:
@@ -234,9 +238,12 @@ def _play_youtube(player, source: str, token: int) -> None:
     silence means the video is on screen, which the user can see for
     themselves."""
     try:
-        url, audio_url, title, err = _resolve_youtube(source)
+        res = _resolve_youtube(source)
+        url, audio_url, title, err = res[0], res[1], res[2], res[3]
+        info_dict = res[4] if len(res) > 4 else {}
     except Exception as e:                                  # noqa: BLE001
         url = audio_url = title = ""
+        info_dict = {}
         err = str(e)
 
     if not _still_wanted(token):
@@ -247,7 +254,7 @@ def _play_youtube(player, source: str, token: int) -> None:
             player.show_video(url, title or source, muted=False,
                               audio_source=audio_url)
             if hasattr(player, "show_lyrics_track"):
-                player.show_lyrics_track(title or source)
+                player.show_lyrics_track(title or source, youtube_info=info_dict)
             return
         except Exception as e:                              # noqa: BLE001
             err = str(e)

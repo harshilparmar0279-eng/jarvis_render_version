@@ -145,7 +145,7 @@ class C:
 _HUE_LINKED = (
     "BG", "PANEL", "PANEL2", "BORDER", "BORDER_B", "BORDER_A",
     "PRI", "PRI_DIM", "PRI_GHO", "TEXT", "TEXT_DIM", "TEXT_MED",
-    "WHITE", "DARK", "BAR_BG",
+    "WHITE", "DARK", "BAR_BG", "BRASS", "BRASS_BRIGHT", "BRASS_GHO", "ACC",
 )
 _PALETTE_DEFAULTS: dict[str, str] = {k: getattr(C, k) for k in _HUE_LINKED}
 
@@ -189,8 +189,41 @@ def apply_ui_accent(accent_hex: str) -> bool:
         h, s, v = colorsys.rgb_to_hsv(r, g, b)
         return h, s, v, a
 
-    base_h = _color_to_hsv(_PALETTE_DEFAULTS["PRI"])[0]
     acc_h, acc_s, _av, _ = _color_to_hsv(accent_hex)
+    is_matrix_green = accent_hex in ("#00ff41", "#00ff66", "#00e676", "#10b981", "#00ff00") or (0.25 <= acc_h <= 0.44 and acc_s > 0.35)
+
+    if is_matrix_green:
+        green_palette = {
+            "BG": "#000000",
+            "DARK": "#000000",
+            "BAR_BG": "#020703",
+            "PANEL": "rgba(2, 10, 4, 0.90)",
+            "PANEL2": "rgba(3, 14, 6, 0.94)",
+            "BORDER": "rgba(0, 255, 65, 0.42)",
+            "BORDER_B": "rgba(0, 255, 65, 0.75)",
+            "BORDER_A": "rgba(0, 255, 65, 0.50)",
+            "PRI": accent_hex,
+            "PRI_DIM": "#008f24",
+            "PRI_GHO": "rgba(0, 255, 65, 0.15)",
+            "TEXT": "#00ff41",
+            "TEXT_DIM": "#1b7a32",
+            "TEXT_MED": "#33cc55",
+            "WHITE": "#d4ffe0",
+            "BRASS": "#00ff41",
+            "BRASS_BRIGHT": "#33ff66",
+            "BRASS_GHO": "rgba(0, 255, 65, 0.18)",
+            "ACC": "#00ff41",
+        }
+        for key, val in green_palette.items():
+            setattr(C, key, val)
+        return True
+
+    C.BRASS = ThemeColors.BRASS
+    C.BRASS_BRIGHT = ThemeColors.BRASS_BRIGHT
+    C.BRASS_GHO = ThemeColors.BRASS_GHO
+    C.ACC = ThemeColors.ACC
+
+    base_h = _color_to_hsv(_PALETTE_DEFAULTS["PRI"])[0]
     dh   = acc_h - base_h
     grey = acc_s < 0.08   # near-grey accent → the whole theme is desaturated
 
@@ -352,9 +385,20 @@ class _SysMetrics:
         ResourceGuardian.get_instance().register_worker("sys_metrics", "System & Process telemetry poller", thread_ref=t, is_essential=True)
 
     def _loop(self):
+        last_trim = time.time()
         while self._running:
             try:
                 self._update()
+                now = time.time()
+                if now - last_trim >= 35.0:
+                    last_trim = now
+                    prof = ResourceGuardian.get_instance().get_profile()
+                    if prof in ("balanced", "low_ram"):
+                        try:
+                            from core.ram_cleaner import release_unused_ram
+                            release_unused_ram()
+                        except Exception:
+                            pass
             except Exception:
                 pass
             interval = ResourceGuardian.get_instance().get_telemetry_interval_sec()
@@ -568,7 +612,8 @@ class HudCanvas(QWidget):
 
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
-        self._tmr.start(16)
+        # 33ms (~30 FPS) provides fluid visual fidelity while keeping CPU usage strictly under 15%
+        self._tmr.start(33)
 
     def glance(self, dx: float, dy: float, hold: float = 1.1) -> None:
         """Ask the avatar to look somewhere for a moment (see HoloAvatar.glance)."""
@@ -661,6 +706,14 @@ class HudCanvas(QWidget):
         return pm
 
     def _step(self):
+        if not self._on_screen():
+            if self._tmr.interval() < 350:
+                self._tmr.setInterval(350)  # Low-frequency idle sleep: drops background CPU to near 0%
+            return
+        elif self._tmr.interval() > 50:
+            prof = ResourceGuardian.get_instance().get_profile()
+            rate = 33 if prof in ("balanced", "low_ram") else 20
+            self._tmr.setInterval(rate)
         self._tick += 1
         now = time.time()
 
@@ -776,6 +829,9 @@ class HudCanvas(QWidget):
     def _on_screen(self) -> bool:
         """True only when this canvas can actually be seen by the user."""
         try:
+            p = self.parent()
+            if isinstance(p, QStackedWidget) and p.currentWidget() is not self:
+                return False
             if not self.isVisible():
                 return False
             win = self.window()
@@ -946,192 +1002,6 @@ class HudCanvas(QWidget):
             p.drawText(QRectF(cx - r, cy - fsz, r * 2, fsz * 2),
                        Qt.AlignmentFlag.AlignCenter, name)
 
-    def _paint_quantum(self, p: QPainter, cx: float, cy: float, r: float,
-                       W: float = 0.0, H: float = 0.0):
-        """Draw the 3D Quantum Orbital Sphere at (cx, cy) with radius r.
-        Dynamic energy plasma core + rotating 3D gyroscopic orbital particle rings +
-        speech-reactive quantum flares."""
-        main, acc = self._core_colours()
-        bg = qcol(C.BG)
-        amp = self._amp_disp
-        t = self._core_phase
-        live = (self.speaking or amp > 0.04) and not self.muted
-
-        def blend(col: QColor, a: float) -> QColor:
-            k = max(0.0, min(1.0, a))
-            return QColor(int(bg.red()   + (col.red()   - bg.red())   * k),
-                          int(bg.green() + (col.green() - bg.green()) * k),
-                          int(bg.blue()  + (col.blue()  - bg.blue())  * k))
-
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        # 1. Soft atmospheric energy glow
-        lift = 1.0 + 0.65 * amp + (0.22 if self.speaking else 0.0)
-        p.setPen(Qt.PenStyle.NoPen)
-        g_outer = QRadialGradient(cx, cy, r * 0.85)
-        g_outer.setColorAt(0.0, blend(main, min(0.9, 0.40 * lift)))
-        g_outer.setColorAt(0.4, blend(acc, min(0.8, 0.20 * lift)))
-        g_outer.setColorAt(0.8, blend(main, 0.05))
-        g_outer.setColorAt(1.0, blend(main, 0.0))
-        p.setBrush(QBrush(g_outer))
-        p.drawEllipse(QRectF(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7))
-
-        # 2. Outer quantum boundary rings with ticks
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(blend(main, 0.25), 1, Qt.PenStyle.DashLine))
-        p.drawEllipse(QRectF(cx - r * 0.88, cy - r * 0.88, r * 1.76, r * 1.76))
-
-        # 3. Rotating 3D Orbital Particle Rings
-        orb_planes = [
-            (0.82, 0.32,  25.0,  1.4, main, 2.0),
-            (0.74, 0.38, -35.0, -1.8, acc,  1.8),
-            (0.65, 0.28,  70.0,  2.2, main, 1.4),
-        ]
-        rate = 1.0 + (1.6 if self.state in ("THINKING", "PROCESSING") else 0.0) + (1.2 if self.speaking else 0.0)
-
-        for rx_s, ry_s, tilt, spd, col, pw in orb_planes:
-            p.save()
-            p.translate(cx, cy)
-            p.rotate(tilt)
-            rx, ry = r * rx_s, r * ry_s
-            p.setPen(QPen(blend(col, 0.45), pw))
-            p.drawEllipse(QRectF(-rx, -ry, rx * 2, ry * 2))
-
-            orbit_angle = (t * spd * rate * 45.0) % 360.0
-            for pt_idx in range(3):
-                pt_a = math.radians(orbit_angle + pt_idx * 120.0)
-                px = rx * math.cos(pt_a)
-                py = ry * math.sin(pt_a)
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(blend(qcol(C.WHITE), 0.9)))
-                node_r = 3.0 + (1.5 * amp if live else 0.5)
-                p.drawEllipse(QRectF(px - node_r, py - node_r, node_r * 2, node_r * 2))
-                p.setBrush(QBrush(blend(col, 0.4)))
-                p.drawEllipse(QRectF(px - node_r * 2, py - node_r * 2, node_r * 4, node_r * 4))
-            p.restore()
-
-        # 4. Central 3D energy core sphere
-        core_r = r * (0.32 + 0.08 * amp)
-        g_core = QRadialGradient(cx - core_r * 0.3, cy - core_r * 0.3, core_r * 1.3)
-        g_core.setColorAt(0.0, blend(qcol(C.WHITE), min(1.0, 0.85 + 0.15 * amp)))
-        g_core.setColorAt(0.35, blend(acc if live else main, 0.80))
-        g_core.setColorAt(0.75, blend(main, 0.50))
-        g_core.setColorAt(1.0, blend(main, 0.10))
-        p.setPen(QPen(blend(qcol(C.WHITE), 0.6), 1.5))
-        p.setBrush(QBrush(g_core))
-        p.drawEllipse(QRectF(cx - core_r, cy - core_r, core_r * 2, core_r * 2))
-
-        # 5. Audio-reactive quantum flare rays
-        n_rays = 40
-        rays = []
-        base_r = core_r + 2
-        for i in range(n_rays):
-            angle = math.radians(i * (360.0 / n_rays) + t * 20.0)
-            ca, sa = math.cos(angle), math.sin(angle)
-            flair = 0.5 + 0.5 * math.sin(t * 3.5 + i * 0.8)
-            idle_h = 3.0 + 2.0 * math.sin(t * 1.5 + i * 0.5)
-            ray_len = idle_h + (r * 0.22 * amp * flair if live else 0.0)
-            rays.append(QLineF(cx + ca * base_r, cy + sa * base_r,
-                               cx + ca * (base_r + ray_len), cy + sa * (base_r + ray_len)))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(blend(acc if live else main, 0.5 + 0.5 * amp), 1.4))
-        p.drawLines(rays)
-
-        # 6. Center Assistant Monogram / Core text
-        name = self._assistant_name or "AI"
-        fsz = max(7, int(core_r * 0.34))
-        f = QFont("Courier New", fsz, QFont.Weight.Bold)
-        p.setFont(f)
-        p.setPen(QPen(blend(qcol(C.WHITE), 0.9), 1))
-        p.drawText(QRectF(cx - core_r, cy - fsz, core_r * 2, fsz * 2),
-                   Qt.AlignmentFlag.AlignCenter, name)
-
-    def _paint_neural(self, p: QPainter, cx: float, cy: float, r: float,
-                      W: float = 0.0, H: float = 0.0):
-        """Draw the Cyberpunk Neural Waveform Visualizer at (cx, cy).
-        Multi-harmonic fluid sine ribbons, synaptic frequency nodes, and sound iris."""
-        main, acc = self._core_colours()
-        bg = qcol(C.BG)
-        amp = self._amp_disp
-        t = self._core_phase
-        live = (self.speaking or amp > 0.04) and not self.muted
-
-        def blend(col: QColor, a: float) -> QColor:
-            k = max(0.0, min(1.0, a))
-            return QColor(int(bg.red()   + (col.red()   - bg.red())   * k),
-                          int(bg.green() + (col.green() - bg.green()) * k),
-                          int(bg.blue()  + (col.blue()  - bg.blue())  * k))
-
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        # 1. Subtle central radar / holographic ring backdrop
-        for rr, a in ((0.85, 0.12), (0.60, 0.18), (0.35, 0.25)):
-            rad = r * rr
-            p.setPen(QPen(blend(main, a), 1))
-            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
-
-        # Circular sound ripples expanding outward
-        rip_phase = (t * 1.5) % 1.0
-        rip_r = r * 0.2 + r * 0.65 * rip_phase
-        rip_alpha = (1.0 - rip_phase) * (0.4 + 0.5 * amp)
-        p.setPen(QPen(blend(acc if live else main, rip_alpha), 1.5))
-        p.drawEllipse(QRectF(cx - rip_r, cy - rip_r, rip_r * 2, rip_r * 2))
-
-        # 2. Multi-harmonic Sine Wave Ribbons
-        wave_span = min(W * 0.90, r * 2.8)
-        x0 = cx - wave_span / 2.0
-        n_steps = ResourceGuardian.get_instance().get_wave_steps()
-        dx = wave_span / n_steps
-
-        wave_layers = [
-            (1.0, 1.2, 0.0,  main, 2.2, 0.85),
-            (2.0, 1.8, 1.4,  acc,  1.8, 0.70),
-            (3.0, 0.9, 2.8,  main, 1.4, 0.50),
-            (1.5, 2.4, 4.1,  acc,  1.2, 0.40),
-        ]
-
-        active_amp = (12.0 + 55.0 * amp) if live else (6.0 + 3.0 * math.sin(t * 1.5))
-
-        for freq, spd, phase_off, col, pen_w, alpha in wave_layers:
-            path = QPainterPath()
-            points = []
-            for i in range(n_steps + 1):
-                wx = x0 + i * dx
-                rel_x = (wx - cx) / (wave_span / 2.0)
-                envelope = max(0.0, 1.0 - rel_x * rel_x) ** 1.8
-                sin_val = math.sin(t * spd * 2.5 + rel_x * math.pi * freq * 1.5 + phase_off)
-                wy = cy + active_amp * envelope * sin_val
-                if i == 0:
-                    path.moveTo(wx, wy)
-                else:
-                    path.lineTo(wx, wy)
-                points.append((wx, wy))
-
-            p.setPen(QPen(blend(col, alpha), pen_w))
-            p.drawPath(path)
-
-            if live and pen_w >= 1.8:
-                for idx in (n_steps // 4, n_steps // 2, 3 * n_steps // 4):
-                    nx, ny = points[idx]
-                    p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(QBrush(blend(qcol(C.WHITE), 0.85)))
-                    p.drawEllipse(QRectF(nx - 2.5, ny - 2.5, 5, 5))
-                    p.setBrush(QBrush(blend(col, 0.35)))
-                    p.drawEllipse(QRectF(nx - 5, ny - 5, 10, 10))
-
-        # 3. Center Cyber Core Badge
-        badge_w, badge_h = 100, 24
-        badge_rect = QRectF(cx - badge_w / 2, cy - badge_h / 2, badge_w, badge_h)
-        p.setBrush(QBrush(blend(qcol(C.PANEL2), 0.85)))
-        p.setPen(QPen(blend(main, 0.50), 1))
-        p.drawRoundedRect(badge_rect, 4, 4)
-
-        f = QFont("Courier New", 8, QFont.Weight.Bold)
-        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
-        p.setFont(f)
-        p.setPen(QPen(blend(qcol(C.WHITE), 0.9), 1))
-        p.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, self._assistant_name or "NEURAL")
-
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():      # device not ready (e.g. 0-size during layout) — skip cleanly
@@ -1183,10 +1053,6 @@ class HudCanvas(QWidget):
                 else:
                     _acc = qcol(C.PRI)
             self._avatar.paint(p, cx, _head_cy, _r_head, _main, _acc, qcol(C.BG))
-        elif self.hud_style == "quantum":
-            self._paint_quantum(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
-        elif self.hud_style == "neural":
-            self._paint_neural(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
         else:
             self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
 
@@ -1452,7 +1318,7 @@ class FileDropZone(QWidget):
         self._dash_offset = 0.0
         self._anim_tmr = QTimer(self)
         self._anim_tmr.timeout.connect(self._animate)
-        self._anim_tmr.start(40)
+        # Do not start timer when idle to prevent continuous background CPU wakeups
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1472,10 +1338,16 @@ class FileDropZone(QWidget):
     def dragEnterEvent(self, e: QDragEnterEvent):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
-            self._drag_over = True; self._canvas.update()
+            self._drag_over = True
+            if not self._anim_tmr.isActive():
+                self._anim_tmr.start(40)
+            self._canvas.update()
 
     def dragLeaveEvent(self, e):
-        self._drag_over = False; self._canvas.update()
+        self._drag_over = False
+        if not self._hovering and self._anim_tmr.isActive():
+            self._anim_tmr.stop()
+        self._canvas.update()
 
     def dropEvent(self, e: QDropEvent):
         self._drag_over = False
@@ -2092,6 +1964,7 @@ class CustomizeOverlay(QWidget):
         self._theme_btns: dict[str, QPushButton] = {}
         t_row1 = QHBoxLayout(); t_row1.setSpacing(4)
         t_row2 = QHBoxLayout(); t_row2.setSpacing(4)
+        split_idx = (len(_THEME_PRESETS) + 1) // 2
         for idx, (tname, thex) in enumerate(_THEME_PRESETS):
             b = QPushButton(tname)
             b.setCheckable(True)
@@ -2100,7 +1973,7 @@ class CustomizeOverlay(QWidget):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _=False, h=thex: self._on_theme_pick(h))
             self._theme_btns[thex] = b
-            if idx < 3:
+            if idx < split_idx:
                 t_row1.addWidget(b)
             else:
                 t_row2.addWidget(b)
@@ -2119,6 +1992,7 @@ class CustomizeOverlay(QWidget):
             ("#f0c544", "Brass"),
             ("#8899aa", "Silver"),
             ("#00b4d8", "Marine"),
+            ("#00ff41", "Matrix Green"),
         ]
         for sw_hex, sw_tip in swatches:
             sb = QPushButton()
@@ -5062,7 +4936,7 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
-    _lyrics_open_sig   = pyqtSignal(str, str)          # (track_name, artist_name)
+    _lyrics_open_sig   = pyqtSignal(str, str, object)  # (track_name, artist_name, youtube_info)
     _lyrics_loaded_sig = pyqtSignal(object, str)       # (LyricsTrack, raw_query)
     _lyrics_pos_sig    = pyqtSignal(float)             # position_sec
     _lyrics_close_sig  = pyqtSignal()
@@ -5501,6 +5375,14 @@ class MainWindow(QMainWindow):
         # Re-run now that the video counts as playing: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
         self._sync_mic_for_video()
+        current_rate = getattr(getattr(self, "_lyrics_panel", None), "_playback_speed", 1.0)
+        if current_rate != 1.0:
+            for p in (self._video_player, self._video_sound):
+                if p:
+                    try:
+                        p.setPlaybackRate(float(current_rate))
+                    except Exception:
+                        pass
         self._video_player.play()
         if self._video_split:
             self._video_sound.play()
@@ -5596,8 +5478,13 @@ class MainWindow(QMainWindow):
         try:
             if self._video_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                 return
+            if self._video_sound.mediaStatus() in (
+                QMediaPlayer.MediaStatus.BufferingMedia,
+                QMediaPlayer.MediaStatus.LoadingMedia,
+            ):
+                return
             drift = self._video_sound.position() - self._video_player.position()
-            if abs(drift) > 300:
+            if abs(drift) > 1500:
                 self._video_sound.setPosition(self._video_player.position())
         except Exception:
             pass
@@ -6233,7 +6120,9 @@ class MainWindow(QMainWindow):
 
         self._bar_cpu = MetricBar("CPU", C.PRI)
         self._bar_mem = MetricBar("SYS RAM", C.ACC2)
+        self._bar_mem.setToolTip("Total Windows Physical RAM used across the entire PC (all apps + OS)")
         self._bar_proc_ram = MetricBar("APP RAM", C.PRI)
+        self._bar_proc_ram.setToolTip("JARVIS Process Working Set RAM (memory actually consumed by this assistant)")
         self._bar_net = MetricBar("NET", C.GREEN)
         self._bar_gpu = MetricBar("GPU", C.ACC)
         self._bar_tmp = MetricBar("TMP", "#ff6688")
@@ -6803,6 +6692,7 @@ class MainWindow(QMainWindow):
         self._lyrics_panel = LyricsPanelWidget()
         self._lyrics_panel.dismiss_requested.connect(self.restore_search_content)
         self._lyrics_panel.seek_requested.connect(self._on_lyrics_seek)
+        self._lyrics_panel.playback_speed_requested.connect(self._on_lyrics_playback_speed)
         self._content_stack.addWidget(self._lyrics_panel)
 
         lay.addWidget(self._content_stack)
@@ -6853,7 +6743,7 @@ class MainWindow(QMainWindow):
         return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace("\n", "<br>"))
 
-    def _on_lyrics_open(self, track_name: str, artist_name: str):
+    def _on_lyrics_open(self, track_name: str, artist_name: str, youtube_info: object = None):
         if not hasattr(self, "_content_stack") or not hasattr(self, "_lyrics_panel"):
             return
         self._content_stack.setCurrentIndex(1)
@@ -6867,8 +6757,9 @@ class MainWindow(QMainWindow):
 
         import threading
         def _fetch():
-            from core.lyrics_engine import LRCLIBClient
-            track = LRCLIBClient.fetch_lyrics(track_name, artist_name)
+            from core.lyrics_engine import LyricsEngine
+            y_info = youtube_info if isinstance(youtube_info, dict) else None
+            track = LyricsEngine.get_lyrics(track_name, artist_name, youtube_info=y_info)
             self._lyrics_loaded_sig.emit(track, track_name)
 
         threading.Thread(target=_fetch, daemon=True, name="lyrics-fetch").start()
@@ -6882,11 +6773,24 @@ class MainWindow(QMainWindow):
             self._lyrics_panel.update_position(pos_sec)
 
     def _on_video_position_changed(self, pos_ms: int):
-        self._lyrics_pos_sig.emit(pos_ms / 1000.0)
+        pos_sec = pos_ms / 1000.0
+        last = getattr(self, "_last_lyrics_pos_emitted", -1.0)
+        if abs(pos_sec - last) >= 0.08:
+            self._last_lyrics_pos_emitted = pos_sec
+            self._lyrics_pos_sig.emit(pos_sec)
 
     def _on_lyrics_seek(self, time_sec: float):
         if hasattr(self, "_video_player") and self._video_player:
             self._video_player.setPosition(int(time_sec * 1000))
+
+    def _on_lyrics_playback_speed(self, speed: float):
+        rate = float(speed)
+        for p in (getattr(self, "_video_player", None), getattr(self, "_video_sound", None)):
+            if p:
+                try:
+                    p.setPlaybackRate(rate)
+                except Exception:
+                    pass
 
     def restore_search_content(self):
         """Restore previous search results when music finishes or lyrics are dismissed."""
@@ -7497,8 +7401,6 @@ class MainWindow(QMainWindow):
         labels = {
             "face": ("🧑  HUD: 3D AVATAR", "Holographic 3D wireframe head"),
             "core": ("◉  HUD: ARC REACTOR", "Rotational Stark Arc Reactor"),
-            "quantum": ("⚛  HUD: QUANTUM ORB", "Orbital energy sphere with dynamic particles"),
-            "neural": ("〰  HUD: NEURAL WAVE", "Harmonic audio-reactive frequency ribbons"),
         }
         text, tip = labels.get(st, ("🧑  HUD: 3D AVATAR", "AI Visualizer mode"))
         style = f"""
@@ -7976,8 +7878,6 @@ class MainWindow(QMainWindow):
         reg.register(CommandItem("view.focus", "Switch Layout: Focus Mode", "Center-focused streamlined layout", "VIEW", "", lambda: self.set_layout_mode("focus")))
         reg.register(CommandItem("view.style_face", "Visualizer: 3D Holographic Head", "Stark avatar 3D low-poly face", "VIEW", "", lambda: self.set_hud_style("face")))
         reg.register(CommandItem("view.style_core", "Visualizer: Stark Arc Reactor", "Revolving sweep arc core", "VIEW", "", lambda: self.set_hud_style("core")))
-        reg.register(CommandItem("view.style_quantum", "Visualizer: Quantum Orbital Sphere", "3D orbital particle sphere", "VIEW", "", lambda: self.set_hud_style("quantum")))
-        reg.register(CommandItem("view.style_neural", "Visualizer: Cyberpunk Neural Waves", "Harmonic audio wave ribbons", "VIEW", "", lambda: self.set_hud_style("neural")))
 
         # Panels & Controls
         reg.register(CommandItem("panel.diagnostics", "Resource Guardian & Diagnostics", "Live RSS, memory leak diagnostics, and profiles", "SYSTEM", "Ctrl+D", self._open_resource_diagnostics))
@@ -8506,9 +8406,9 @@ class JarvisUI:
         if not self.muted:
             self.set_state("LISTENING")
 
-    def show_lyrics_track(self, track_name: str, artist_name: str = "") -> None:
+    def show_lyrics_track(self, track_name: str, artist_name: str = "", youtube_info: dict = None) -> None:
         """Thread-safe: display live synchronized lyrics in bottom-center panel."""
-        self._win._lyrics_open_sig.emit(str(track_name or ""), str(artist_name or ""))
+        self._win._lyrics_open_sig.emit(str(track_name or ""), str(artist_name or ""), youtube_info or {})
 
     def update_lyrics_position(self, pos_sec: float) -> None:
         """Thread-safe: update lyrics playback position."""

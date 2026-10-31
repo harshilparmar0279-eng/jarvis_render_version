@@ -354,6 +354,14 @@ class ResourceGuardian:
                 except Exception as e:
                     print(f"[ResourceGuardian] Profile callback error: {e}")
 
+        # Active memory trimming when switching to Balanced or Low RAM
+        if clean in (PROFILE_BALANCED, PROFILE_LOW_RAM):
+            try:
+                from core.ram_cleaner import release_unused_ram
+                release_unused_ram()
+            except Exception:
+                pass
+
         return clean
 
     def add_profile_listener(self, cb: Callable[[str], None]):
@@ -372,16 +380,20 @@ class ResourceGuardian:
             return 5.0
         elif prof == PROFILE_FULL_EXPERIENCE:
             return 1.5
-        return 2.0  # Balanced
+        return 3.0  # Balanced: 3.0s interval reduces background polling overhead
 
     def get_dust_particles_count(self) -> int:
         prof = self.get_profile()
         if prof == PROFILE_LOW_RAM:
             return 0
-        return 35
+        elif prof == PROFILE_BALANCED:
+            return 14  # Balanced: lightweight ambient dust particles
+        return 35      # Full Experience: 35 particles
 
     def get_wave_steps(self) -> int:
         prof = self.get_profile()
         if prof == PROFILE_LOW_RAM:
             return 36
-        return 72
+        elif prof == PROFILE_BALANCED:
+            return 48  # Balanced: smooth wave animation with low CPU/RAM
+        return 72      # Full Experience: 72 steps

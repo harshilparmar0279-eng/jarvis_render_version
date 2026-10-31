@@ -119,13 +119,12 @@ THEME_PRESETS = [
     ("⚡ CYBER BRASS",  "#f0c544"),   # High-voltage bright gold
     ("🛡 STEALTH",      "#8899aa"),   # Oceanic silver/grey
     ("🌊 DEEP BLUE",    "#00b4d8"),   # Radiant deep marine
+    ("🟢 MATRIX GREEN", "#00ff41"),   # Hacker/terminal cyber green on pure black
 ]
 
 HUD_PRESETS = [
     ("🧑 3D AVATAR",     "face"),
     ("◉ ARC REACTOR",   "core"),
-    ("⚛ QUANTUM ORB",   "quantum"),
-    ("〰 NEURAL WAVE",   "neural"),
 ]
 
 LAYOUT_PRESETS = [
