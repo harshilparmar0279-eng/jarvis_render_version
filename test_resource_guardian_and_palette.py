@@ -143,13 +143,14 @@ class TestResourceProfiles(unittest.TestCase):
 
     def test_profile_tuning_parameters(self):
         self.guardian.set_profile(PROFILE_LOW_RAM)
-        self.assertEqual(self.guardian.get_telemetry_interval_sec(), 5.0)
+        self.assertEqual(self.guardian.get_telemetry_interval_sec(), 20.0)
         self.assertEqual(self.guardian.get_dust_particles_count(), 0)
         self.assertEqual(self.guardian.get_wave_steps(), 36)
-        self.assertEqual(self.guardian.get_hud_timer_ms(), 100)
+        self.assertEqual(self.guardian.get_hud_timer_ms(), 33)
         self.assertFalse(self.guardian.is_3d_avatar_enabled())
-        self.assertEqual(self.guardian.get_anim_duration_ms(), 0)
+        self.assertEqual(self.guardian.get_anim_duration_ms(), 70)
         self.assertFalse(self.guardian.is_sparkline_live_enabled())
+        self.assertFalse(self.guardian.is_sensor_tracking_enabled())
 
         self.guardian.set_profile(PROFILE_BALANCED)
         self.assertEqual(self.guardian.get_telemetry_interval_sec(), 3.0)
@@ -159,6 +160,7 @@ class TestResourceProfiles(unittest.TestCase):
         self.assertTrue(self.guardian.is_3d_avatar_enabled())
         self.assertEqual(self.guardian.get_anim_duration_ms(), 90)
         self.assertTrue(self.guardian.is_sparkline_live_enabled())
+        self.assertTrue(self.guardian.is_sensor_tracking_enabled())
 
         self.guardian.set_profile(PROFILE_FULL_EXPERIENCE)
         self.assertEqual(self.guardian.get_telemetry_interval_sec(), 1.5)

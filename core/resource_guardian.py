@@ -377,7 +377,7 @@ class ResourceGuardian:
     def get_telemetry_interval_sec(self) -> float:
         prof = self.get_profile()
         if prof == PROFILE_LOW_RAM:
-            return 5.0
+            return 20.0 # Low RAM: 20s interval eliminates background polling overhead
         elif prof == PROFILE_FULL_EXPERIENCE:
             return 1.5
         return 3.0  # Balanced: 3.0s interval reduces background polling overhead
@@ -401,7 +401,7 @@ class ResourceGuardian:
     def get_hud_timer_ms(self) -> int:
         prof = self.get_profile()
         if prof == PROFILE_LOW_RAM:
-            return 100  # Low RAM: 10 Hz event-driven rate
+            return 33   # Low RAM: 30 FPS fluid rendering when active (zero lag!)
         elif prof == PROFILE_BALANCED:
             return 33   # Balanced: 30 FPS fluid rendering
         return 16       # Full Experience: 60 FPS high-refresh rate
@@ -413,10 +413,14 @@ class ResourceGuardian:
     def get_anim_duration_ms(self) -> int:
         prof = self.get_profile()
         if prof == PROFILE_LOW_RAM:
-            return 0    # Instant snappy cuts (0ms CPU animation cost)
+            return 70   # Crisp 70ms snappy transition: agile and smooth without lag
         elif prof == PROFILE_BALANCED:
             return 90
         return 130
+
+    def is_sensor_tracking_enabled(self) -> bool:
+        prof = self.get_profile()
+        return prof != PROFILE_LOW_RAM
 
     def is_sparkline_live_enabled(self) -> bool:
         prof = self.get_profile()

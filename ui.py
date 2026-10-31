@@ -405,6 +405,23 @@ class _SysMetrics:
             time.sleep(interval)
 
     def _update(self):
+        prof = ResourceGuardian.get_instance().get_profile()
+        if prof == "low_ram":
+            # In Low RAM mode: bypass expensive WMI, NVML, network counter deltas, and process sweeps!
+            snap = ResourceGuardian.get_instance().capture_snapshot()
+            with self._lock:
+                self.cpu = snap.system_cpu_percent
+                self.mem = snap.system_ram_percent
+                self.net = 0.0
+                self.gpu = -1.0
+                self.tmp = -1.0
+                self.proc_ram = snap.process_rss_mb
+                self.proc_cpu = snap.process_cpu_percent
+                self.sys_ram_avail = snap.system_ram_available_gb
+                self.sys_ram_total = snap.system_ram_total_gb
+                self.state = snap.state
+            return
+
         snap = ResourceGuardian.get_instance().capture_snapshot()
         cpu = snap.system_cpu_percent
         mem = snap.system_ram_percent
@@ -740,8 +757,8 @@ class HudCanvas(QWidget):
                 if self._tmr.interval() < 600:
                     self._tmr.setInterval(600)  # 1.5 wakeups/sec when idle: true 0% CPU!
                 return
-            elif self._tmr.interval() > 100:
-                self._tmr.setInterval(100)      # Reactive rate during user speech
+            elif self._tmr.interval() != 33:
+                self._tmr.setInterval(33)       # 30 FPS fluid rendering during speech/active interaction (zero lag!)
         elif self._tmr.interval() > 50:
             rate = 33 if prof == "balanced" else 16
             self._tmr.setInterval(rate)
@@ -5956,7 +5973,21 @@ class MainWindow(QMainWindow):
         self._fit_video()
 
     def _update_metrics(self):
+        prof = getattr(self, "_resource_profile", "balanced")
         snap = _metrics.snapshot()
+
+        if prof == "low_ram":
+            # In Low RAM mode: update minimal eco capsule and skip heavy process table sweeps
+            proc_ram = snap.get("proc_ram", 0.0)
+            cpu = snap.get("cpu", 0.0)
+            st = snap.get("state", "IDLE")
+            if hasattr(self, "_eco_status_lbl"):
+                self._eco_status_lbl.setText(f"APP: {proc_ram:.0f} MB")
+            if hasattr(self, "_eco_sub_lbl"):
+                self._eco_sub_lbl.setText(f"CPU: {cpu:.0f}% • {st}")
+            if hasattr(self, "_prof_btn"):
+                self._prof_btn.setText(PROFILE_DISPLAY_NAMES.get(prof, "LOW RAM"))
+            return
 
         # CPU
         cpu = snap["cpu"]
@@ -6163,6 +6194,33 @@ class MainWindow(QMainWindow):
         self._bar_gpu = MetricBar("GPU", C.ACC)
         self._bar_tmp = MetricBar("TMP", "#ff6688")
 
+        # Minimal Eco Status Panel (used in Low RAM mode)
+        self._eco_panel = QWidget()
+        self._eco_panel.setStyleSheet(
+            f"background: {C.PANEL2}; border: 1px solid {C.BORDER}; border-radius: 6px;"
+        )
+        eco_lay = QVBoxLayout(self._eco_panel)
+        eco_lay.setContentsMargins(8, 10, 8, 10)
+        eco_lay.setSpacing(6)
+
+        self._eco_badge = QLabel("⚡ ECO ACTIVE")
+        self._eco_badge.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._eco_badge.setStyleSheet(f"color: {C.GREEN}; background: transparent; border: none;")
+        eco_lay.addWidget(self._eco_badge)
+
+        self._eco_status_lbl = QLabel("APP: -- MB")
+        self._eco_status_lbl.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._eco_status_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent; border: none;")
+        eco_lay.addWidget(self._eco_status_lbl)
+
+        self._eco_sub_lbl = QLabel("CPU: --% • IDLE")
+        self._eco_sub_lbl.setFont(QFont("Courier New", 7))
+        self._eco_sub_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        eco_lay.addWidget(self._eco_sub_lbl)
+
+        self._eco_panel.hide()
+        lay.addWidget(self._eco_panel)
+
         for bar in [self._bar_cpu, self._bar_mem, self._bar_proc_ram, self._bar_net,
                     self._bar_gpu, self._bar_tmp]:
             lay.addWidget(bar)
@@ -6171,11 +6229,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._sparkline)
         lay.addSpacing(2)
 
-        info_panel = QWidget()
-        info_panel.setStyleSheet(
+        self._info_panel = QWidget()
+        self._info_panel.setStyleSheet(
             f"background: {C.PANEL2}; border: 1px solid {C.BORDER}; border-radius: 4px;"
         )
-        ip_lay = QVBoxLayout(info_panel)
+        ip_lay = QVBoxLayout(self._info_panel)
         ip_lay.setContentsMargins(6, 4, 6, 4)
         ip_lay.setSpacing(2)
 
@@ -6200,10 +6258,16 @@ class MainWindow(QMainWindow):
         os_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent; border: none;")
         ip_lay.addWidget(os_lbl)
 
-        lay.addWidget(info_panel)
+        lay.addWidget(self._info_panel)
         lay.addSpacing(4)
 
         lay.addStretch()
+
+        self._protocol_panel = QWidget()
+        self._protocol_panel.setStyleSheet("background: transparent;")
+        pp_lay = QVBoxLayout(self._protocol_panel)
+        pp_lay.setContentsMargins(0, 0, 0, 0)
+        pp_lay.setSpacing(4)
 
         for txt, col in [
             ("AI CORE\nACTIVE",  C.GREEN),
@@ -6217,8 +6281,9 @@ class MainWindow(QMainWindow):
                 f"color: {col}; background: {C.PANEL2};"
                 f"border: 1px solid {C.BORDER_A}; border-radius: 3px; padding: 4px;"
             )
-            lay.addWidget(lbl)
+            pp_lay.addWidget(lbl)
 
+        lay.addWidget(self._protocol_panel)
         return w
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
@@ -7892,9 +7957,27 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_lyrics_panel") and self._lyrics_panel:
             self._lyrics_panel.apply_resource_profile(clean)
 
-        # 3. Dynamic Sparkline live telemetry updates
+        # 3. Dynamic Left Rail Minimal Restructuring & Telemetry Gating
+        is_eco = (clean == "low_ram")
+        if hasattr(self, "_eco_panel") and self._eco_panel:
+            self._eco_panel.setVisible(is_eco)
+        for b in [getattr(self, "_bar_cpu", None), getattr(self, "_bar_mem", None),
+                  getattr(self, "_bar_proc_ram", None), getattr(self, "_bar_net", None),
+                  getattr(self, "_bar_gpu", None), getattr(self, "_bar_tmp", None)]:
+            if b:
+                b.setVisible(not is_eco)
         if hasattr(self, "_sparkline") and self._sparkline:
-            self._sparkline.setEnabled(clean != "low_ram")
+            self._sparkline.setVisible(not is_eco)
+            self._sparkline.setEnabled(not is_eco)
+        if hasattr(self, "_info_panel") and self._info_panel:
+            self._info_panel.setVisible(not is_eco)
+        if hasattr(self, "_protocol_panel") and self._protocol_panel:
+            self._protocol_panel.setVisible(not is_eco)
+
+        # Dynamic metric timer rate: 20s in low_ram, 3s in balanced, 1.5s in full
+        if hasattr(self, "_metric_tmr") and self._metric_tmr:
+            tmr_rate = 20000 if is_eco else (3000 if clean == "balanced" else 1500)
+            self._metric_tmr.setInterval(tmr_rate)
 
         # 4. Immediate memory release for Low RAM and Balanced modes
         if clean in ("low_ram", "balanced"):
