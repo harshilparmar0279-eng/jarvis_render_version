@@ -93,8 +93,8 @@ def _read_full_config() -> dict:
 
 # Single source of truth for the release name — the window title, the header
 # badge and the readme must never disagree again.
-APP_VERSION  = "MARK LVI"
-APP_PROTOCOL = APP_VERSION.split()[-1]
+APP_VERSION  = ""
+APP_PROTOCOL = "SECURE"
 
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
@@ -4989,7 +4989,8 @@ class MainWindow(QMainWindow):
         if _ui_color and _ui_color.lower() != DEFAULT_UI_COLOR:
             apply_ui_accent(_ui_color)
 
-        self.setWindowTitle(f"{_display} — {APP_VERSION}")
+        title = f"{_display} — {APP_VERSION}" if APP_VERSION else _display
+        self.setWindowTitle(title)
         self.setMinimumSize(_MIN_W, _MIN_H)
         self.resize(_DEFAULT_W, _DEFAULT_H)
 
@@ -6044,8 +6045,9 @@ class MainWindow(QMainWindow):
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
-        lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
-        lay.addSpacing(8)
+        if APP_VERSION:
+            lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
+            lay.addSpacing(8)
         self._drawer_btn = QPushButton("⚙")
         self._drawer_btn.setFixedSize(26, 26)
         self._drawer_btn.setFont(QFont("Courier New", 11))
@@ -7668,7 +7670,8 @@ class MainWindow(QMainWindow):
         """Update all name/theme/visualizer/layout elements and persist to config."""
         self._assistant_name = name.strip() or "JARVIS"
         display = self._assistant_name.upper()
-        self.setWindowTitle(f"{display} — {APP_VERSION}")
+        title = f"{display} — {APP_VERSION}" if APP_VERSION else display
+        self.setWindowTitle(title)
         self._title_lbl.setText(display)
         from memory.config_manager import get_voice
         v_disp = (voice or get_voice() or "Mayra").strip().title()

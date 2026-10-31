@@ -1,4 +1,4 @@
-# ⚙️ MARK LVI (56)
+# ⚙️ JARVIS
 ### The Ultimate Cross-Platform Personal AI Assistant — By HarshilParmar
 
 > 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@HarshilParmar)**
@@ -9,11 +9,11 @@ A real-time voice AI that can hear, see, speak, and control your computer — on
 
 ## ✨ Overview
 
-Mark LV gave the assistant a screen. **Mark LVI lets you choose what runs it.**
+**JARVIS lets you choose what runs it.**
 
 Until now this was a Gemini assistant, and only that. If you had no quota left, no
 connection, or a rule that says your microphone does not leave the building, you
-had no assistant. Mark LVI adds a second way to hold the conversation — speech
+had no assistant. JARVIS adds a second way to hold the conversation — speech
 recognition, a language model and a voice, assembled from parts you pick in
 ⚙ → **ENGINE & PROVIDERS** — and a way to point the assistant's own background
 requests at a different model without touching the voice at all.
@@ -32,7 +32,7 @@ inherits the avatar, the lip-sync, the self-echo guard, push-to-talk, the wake
 word, memory, undo, the confirmation gate and every action and plugin — because
 it enters through the same door the Live session always did.
 
-Mark LVI also changes what the assistant is allowed to CLAIM. Every tool that
+JARVIS also changes what the assistant is allowed to CLAIM. Every tool that
 drives an application now answers with what it observed rather than with what it
 attempted: `done` means it was checked, `unverified` means the request went out
 and could not be confirmed — and the assistant says exactly that instead of
@@ -114,7 +114,7 @@ It's not just an assistant — it's an extension of your digital life.
 
 ---
 
-## 🆕 What's New in Mark LVI
+## 🆕 What's New
 
 **Nothing new is installed by default.** Talking to a model — local or hosted — uses `httpx`, which already ships with `google-genai`. The system's own voices need no Python package at all. Local speech recognition (`faster-whisper`) and the neural voice (`piper-tts`) are one-click installs from inside the panel, and are deliberately absent from `requirements.txt`: a fresh clone that only ever uses Gemini should not download several hundred megabytes for a feature it will not open.
 
@@ -626,7 +626,7 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 | **LIII** | Wake word · Gemini 3.1 Flash Live · instant acknowledgment · self-describing action/plugin architecture |
 | **LIV** | Holographic avatar · viseme lip-sync · facial acting · face-as-status · push-to-talk · self-echo guard · runtime self-knowledge & limits |
 | **LV** | Video on the HUD · model ladder with measured fallback · split settings drawers · trimmed bundled skill list |
-| **LVI** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
+| **Current** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
 | *shared* | The last five above also shipped to LIII, LIV and LV at the same time — moving up a Mark never loses them |
 | **LVII+** | Interrupt by voice · conversation history · full file access · security camera · Obsidian |
 
@@ -670,7 +670,7 @@ python main.py
 ## 🗂️ Project Structure
 
 ```
-Mark LVI/
+jarvis/
 ├── main.py                   # Core loop — Gemini Live session, audio I/O, viseme extraction, tool dispatch
 ├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer, camera feed
 ├── setup.py                  # OS-aware installer (skips wrong-OS dependencies, checks your Python)
@@ -801,7 +801,7 @@ All three are listed in `.gitignore`, so a fork or a pull request cannot leak th
 
 Your voice is streamed to Google's Gemini Live API while a session is open; that is the one thing that leaves your computer, and it stops when you mute or close the app.
 
-**Mark LVI changes what that sentence can say about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
+**You can choose what that sentence says about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
 
 ---
 
@@ -810,14 +810,3 @@ Your voice is streamed to Google's Gemini Live API while a session is open; that
 Personal and non-commercial use only.
 Licensed under **[Creative Commons BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)**.
 
----
-
-## 👤 Connect with the Creator
-
-Engineered by a developer building a real-world JARVIS-style assistant.
-⭐ **Star the repository to support the journey to Mark 100.**
-
-| Platform | Link |
-| --- | --- |
-| YouTube | [@HarshilParmar](https://www.youtube.com/@HarshilParmar) |
-| Instagram | [@harshilparmar](https://www.instagram.com/harshilparmar) |
