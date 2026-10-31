@@ -322,29 +322,32 @@ class ConstellationLyricsWidget(QWidget):
             active_w_idx = self._active_word_idx
 
             # A. Laser Filament connecting previous star to newly active star
-            if self._prev_active_idx >= 0 and self._prev_active_idx < len(self._lines) and self._prev_active_idx != self._active_idx:
+            # Active strictly during transition flight (pulse_phase < 1.0); completely removed upon arrival at the new node!
+            if (self._pulse_phase < 1.0 and 
+                0 <= self._prev_active_idx < len(self._lines) and 
+                self._prev_active_idx != self._active_idx):
                 prev_item = self._lines[self._prev_active_idx]
                 px_prev = prev_item['x_ratio'] * W
                 py_prev = prev_item['y_ratio'] * H
 
-                # Radiant laser beam
+                bx = px_prev + (nx - px_prev) * self._pulse_phase
+                by = py_prev + (ny - py_prev) * self._pulse_phase
+
+                # Radiant laser beam shoots from origin node towards the traveling photon head
                 p.setPen(QPen(QColor(pri_r, pri_g, pri_b, 75), 4.5))
-                p.drawLine(QPointF(px_prev, py_prev), QPointF(nx, ny))
+                p.drawLine(QPointF(px_prev, py_prev), QPointF(bx, by))
 
                 p.setPen(QPen(QColor(225, 255, 235, 230), 1.8))
-                p.drawLine(QPointF(px_prev, py_prev), QPointF(nx, ny))
+                p.drawLine(QPointF(px_prev, py_prev), QPointF(bx, by))
 
-                # Traveling Photon Pulse Particle during transition
-                if self._pulse_phase < 1.0:
-                    bx = px_prev + (nx - px_prev) * self._pulse_phase
-                    by = py_prev + (ny - py_prev) * self._pulse_phase
-                    g_pulse = QRadialGradient(bx, by, 15.0)
-                    g_pulse.setColorAt(0.0, QColor(255, 255, 255, 255))
-                    g_pulse.setColorAt(0.35, QColor(pri_r, pri_g, pri_b, 220))
-                    g_pulse.setColorAt(1.0, QColor(pri_r, pri_g, pri_b, 0))
-                    p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(QBrush(g_pulse))
-                    p.drawEllipse(QPointF(bx, by), 13, 13)
+                # Traveling Photon Pulse Particle at the leading tip
+                g_pulse = QRadialGradient(bx, by, 15.0)
+                g_pulse.setColorAt(0.0, QColor(255, 255, 255, 255))
+                g_pulse.setColorAt(0.35, QColor(pri_r, pri_g, pri_b, 220))
+                g_pulse.setColorAt(1.0, QColor(pri_r, pri_g, pri_b, 0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(g_pulse))
+                p.drawEllipse(QPointF(bx, by), 13, 13)
 
             # B. ACTIVE STAR: Radiant Starlight Corona
             g_star = QRadialGradient(nx, ny, 36.0)
