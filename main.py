@@ -112,7 +112,7 @@ PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 #
 # It is reassigned on every connect, so a model that runs out of quota is
 # stepped over and the assistant keeps talking instead of failing to start.
-LIVE_MODEL          = "models/gemini-3.8-live-preview"
+LIVE_MODEL          = "models/gemini-3.8-live"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
@@ -2770,32 +2770,30 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
-                # 1008 / GoAway / ConnectionClosed - normal WebSocket lifecycle cycling
-                if any(k in err_str.lower() for k in ("1008", "goaway", "connectionclosed")):
-                    print(f"[JARVIS] 🔄 WebSocket connection cycled by server ({type(e).__name__}) — refreshing session")
-                    self.ui.write_log("SYS: Refreshing connection — continuing conversation.")
-                    self._conn_backoff = 0
-                    continue
 
-                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
-                traceback.print_exc()
-
-                # Out of quota, or this model is not available to this key —
-                # step down the ladder and reconnect straight away. This is the
-                # difference between "JARVIS is quieter today" and "JARVIS does
-                # not start today": one model means one daily limit, and the
-                # limit always arrives mid-conversation.
+                # 1. First priority: Check if error is quota exhaustion or model not supported/found
                 if _gemini.note_live_failure(live_model, err_str):
                     nxt = _gemini.live_model()
                     self.ui.write_log(
                         f"SYS: Switching to {nxt.split('/')[-1]} — the previous "
-                        f"model is out of quota."
+                        f"model is out of quota or unavailable."
                         if nxt != live_model else
                         "SYS: Every live model is rate-limited — retrying.")
                     self._conn_backoff = 0 if nxt != live_model else 15
                     if nxt == live_model:
                         await asyncio.sleep(self._conn_backoff)
                     continue
+
+                # 2. Normal WebSocket lifecycle cycling (GoAway / clean disconnect)
+                if any(k in err_str.lower() for k in ("goaway", "connectionclosed")) or ("1008" in err_str and "not found" not in err_str.lower() and "quota" not in err_str.lower()):
+                    print(f"[JARVIS] 🔄 WebSocket connection cycled by server ({type(e).__name__}) — refreshing session")
+                    self.ui.write_log("SYS: Refreshing connection — continuing conversation.")
+                    self._conn_backoff = min(6, getattr(self, "_conn_backoff", 0) + 1)
+                    await asyncio.sleep(self._conn_backoff)
+                    continue
+
+                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
+                traceback.print_exc()
 
                 # Turn-taking / media / thinking knobs rejected by the server
                 # (preview API drift) — drop them first, because they are the
