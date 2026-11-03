@@ -84,24 +84,27 @@ def clean_song_query(raw_query: str) -> str:
     Strips noise words while preserving full song title and artist names (e.g. 'by Arijit Singh').
     """
     q = raw_query.strip()
-    # Remove browser instructions
+    # Remove service & browser connectors
+    q = re.sub(r"\b(in|on|at|pe|par|me|mein)\s+(youtube\s+music|youtube|chrome|brave)\b", "", q, flags=re.I)
+    q = re.sub(r"\b(youtube\s+music|youtube|chrome|brave)\s+(in|on|at|pe|par|me|mein)\b", "", q, flags=re.I)
     q = _RE_BRAVE.sub("", q)
     q = _RE_CHROME.sub("", q)
-    # Remove service names
     q = _RE_YT_MUSIC.sub("", q)
     q = _RE_YT.sub("", q)
 
-    # Remove generic filler prefixes and suffixes
     patterns_to_remove = [
-        r"^(please\s+)?(play\s+me|play|stream|listen\s+to)\s+",
+        r"^(please\s+)?(play\s+me|play\s+karo|play|stream|listen\s+to|chalao|bajao|lagao|sunao)\s+",
         r"^(mujhe\s+)?(ek\s+)?(gana|song|music|video)\s+",
         r"\s+(music\s+)?(play\s+karo|chalao|bajao|lagao|sunao|chalu\s+karo|play\s+kardo)$",
         r"\s+(gana|song|music)$",
         r"\s+(kholo|open\s+karo|open|launch)$",
         r"^(jarvis|snow|nia|dragon|mayra|kavya|xg|tiara|alexa|siri|computer)[,\s]+",
+        r"^(in|on|at|pe|par|me|mein)\s+",
+        r"\s+(in|on|at|pe|par|me|mein)$",
     ]
-    for pat in patterns_to_remove:
-        q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
+    for _ in range(2):
+        for pat in patterns_to_remove:
+            q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
 
     # If stripped empty, return original stripped
     return q.strip() if q.strip() else raw_query.strip()
@@ -117,6 +120,7 @@ def parse_media_intent(command: str) -> dict:
     C. 'Play [song]' / '[song] music play karo' -> YouTube Music in Chrome with auto-playback
     D. 'Chrome mein [song] play karo' -> Regular YouTube in Chrome (NOT redirected to Music)
     E. Explicit browser requests override defaults. Without a specified browser, use Chrome.
+    F. Explicit YouTube request (e.g. 'play in youtube', 'play in brave youtube') -> Regular YouTube.
     """
     raw = command.strip()
     cmd_lower = raw.lower()
@@ -124,16 +128,15 @@ def parse_media_intent(command: str) -> dict:
     browser, is_explicit_browser = extract_browser_preference(cmd_lower)
 
     # Check for Rule D: Explicit "Chrome mein [song] play karo"
-    # User specifically asked for Chrome playback of a song -> Regular YouTube
     is_chrome_explicit_play = (
         bool(_RE_CHROME.search(cmd_lower)) and
         bool(_RE_PLAY_VERBS.search(cmd_lower)) and
         not bool(_RE_YT_MUSIC.search(cmd_lower))
     )
 
-    # Check if this is an explicit YouTube open (no song query)
-    is_yt_music_kw = bool(_RE_YT_MUSIC.search(cmd_lower))
-    is_yt_kw = bool(_RE_YT.search(cmd_lower))
+    # Check service keywords
+    is_yt_music_kw = bool(_RE_YT_MUSIC.search(cmd_lower)) or "music.youtube" in cmd_lower
+    is_yt_kw = bool(_RE_YT.search(cmd_lower)) and not is_yt_music_kw
     has_open_verb = bool(_RE_OPEN_VERBS.search(cmd_lower))
     has_play_verb = bool(_RE_PLAY_VERBS.search(cmd_lower))
 
@@ -176,7 +179,31 @@ def parse_media_intent(command: str) -> dict:
             "verified_playback": True,
         }
 
-    # Rule C: 'Play [song name]' / '[song name] music play karo' -> YouTube Music default!
+    # Rule F: Explicit YouTube (not Music): e.g. "play in youtube", "play in brave youtube", "youtube pe chalao"
+    if is_yt_kw and not is_yt_music_kw and (has_play_verb or song_candidate):
+        return {
+            "intent": "PLAY_YOUTUBE",
+            "service": "youtube",
+            "browser": browser,
+            "explicit_browser": is_explicit_browser,
+            "url": "",
+            "query": song_candidate,
+            "verified_playback": True,
+        }
+
+    # Explicit YouTube Music: e.g. "play in youtube music", "youtube music pe chalao"
+    if is_yt_music_kw:
+        return {
+            "intent": "PLAY_MUSIC",
+            "service": "youtube_music",
+            "browser": browser,
+            "explicit_browser": is_explicit_browser,
+            "url": "",
+            "query": song_candidate,
+            "verified_playback": True,
+        }
+
+    # Rule C: 'Play [song name]' / '[song name] music play karo' -> YouTube Music default for browser media router
     if has_play_verb or is_yt_music_kw or "music" in cmd_lower or "gana" in cmd_lower or "song" in cmd_lower:
         return {
             "intent": "PLAY_MUSIC",

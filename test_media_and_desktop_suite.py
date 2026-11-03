@@ -99,6 +99,35 @@ class TestMediaCommandRouting(unittest.TestCase):
         self.assertEqual(res_brave_music["browser"], "brave")
         self.assertEqual(res_brave_music["query"].lower(), "kesariya")
 
+    def test_rule_f_specific_playback_conditions(self):
+        """Test specific playback target conditions: YouTube Music, YouTube, and Brave YouTube."""
+        # 1. 'play in youtube music' -> YouTube Music
+        res_ytm = parse_media_intent("play Kesariya in youtube music")
+        self.assertEqual(res_ytm["intent"], "PLAY_MUSIC")
+        self.assertEqual(res_ytm["service"], "youtube_music")
+        self.assertEqual(res_ytm["browser"], "chrome")
+        self.assertEqual(res_ytm["query"].lower(), "kesariya")
+
+        # 2. 'play in youtube' -> Regular YouTube
+        res_yt = parse_media_intent("play Believer in youtube")
+        self.assertEqual(res_yt["intent"], "PLAY_YOUTUBE")
+        self.assertEqual(res_yt["service"], "youtube")
+        self.assertEqual(res_yt["browser"], "chrome")
+        self.assertEqual(res_yt["query"].lower(), "believer")
+
+        # 3. 'play in brave youtube' -> Brave browser YouTube
+        res_brave_yt = parse_media_intent("play Despacito in brave youtube")
+        self.assertEqual(res_brave_yt["intent"], "PLAY_YOUTUBE")
+        self.assertEqual(res_brave_yt["service"], "youtube")
+        self.assertEqual(res_brave_yt["browser"], "brave")
+        self.assertEqual(res_brave_yt["query"].lower(), "despacito")
+
+        res_brave_yt2 = parse_media_intent("play in brave youtube Believer")
+        self.assertEqual(res_brave_yt2["intent"], "PLAY_YOUTUBE")
+        self.assertEqual(res_brave_yt2["service"], "youtube")
+        self.assertEqual(res_brave_yt2["browser"], "brave")
+        self.assertEqual(res_brave_yt2["query"].lower(), "believer")
+
     @patch("core.media_router.find_chrome_executable", return_value=None)
     def test_never_silently_fall_back_to_brave_when_chrome_missing(self, mock_find_chrome):
         # If Chrome is unavailable, return error rather than opening Brave

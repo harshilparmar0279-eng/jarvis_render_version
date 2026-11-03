@@ -304,28 +304,35 @@ def _handle_search(parameters: dict, player) -> str:
 def _handle_play(parameters: dict, player) -> str:
     query = parameters.get("query", "").strip()
     if not query:
-        return "Please tell me what you'd like to watch, sir."
+        return "Please tell me what you'd like to play, sir."
+
+    browser = (parameters.get("browser") or "").lower().strip() or "chrome"
+    service = (parameters.get("service") or "").lower().strip() or "youtube"
+
+    q_low = query.lower()
+    if "brave" in q_low or "in brave" in q_low:
+        browser = "brave"
+    if "youtube music" in q_low or "music.youtube" in q_low or service == "youtube_music":
+        service = "youtube_music"
 
     if player:
-        player.write_log(f"[YouTube] Searching: {query}")
+        player.write_log(f"[YouTube] Playing '{query}' on {service} in {browser.title()}")
 
-    print(f"[YouTube] 🔍 Scraping first non-Shorts video for: {query}")
+    print(f"[YouTube] ▶️ Playing: '{query}' | Service: {service} | Browser: {browser}")
 
-    video_url = _scrape_first_video_url(query)
-
-    if video_url:
-        print(f"[YouTube] ▶️ Opening: {video_url}")
-        _open_url(video_url)
-        return f"Playing: {query}"
-
-    print(f"[YouTube] ⚠️ Scrape failed, opening filtered search page")
-    fallback_url = (
-        f"https://www.youtube.com/results"
-        f"?search_query={quote_plus(query)}"
-        f"&sp={_YT_VIDEO_FILTER}"
-    )
-    _open_url(fallback_url)
-    return f"Opened YouTube search for: {query} (manual selection required)"
+    from core.media_router import route_media_command
+    if service == "youtube_music":
+        cmd = f"{browser} mein {query} on youtube music" if browser == "brave" else f"{query} on youtube music"
+        ok, msg, _ = route_media_command(cmd, player=player)
+        return msg
+    elif browser == "brave":
+        cmd = f"brave mein {query} on youtube"
+        ok, msg, _ = route_media_command(cmd, player=player)
+        return msg
+    else:
+        cmd = f"chrome mein {query} on youtube"
+        ok, msg, _ = route_media_command(cmd, player=player)
+        return msg
 
 
 def _handle_summarize(parameters: dict, player, speak) -> str:
@@ -465,17 +472,36 @@ def youtube_video(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "youtube_video",
-    "description": "Controls YouTube. Use for: searching YouTube, playing videos, summarizing a video's content, getting video info, or showing trending videos.",
+    "description": (
+        "Controls YouTube and YouTube Music in the external web browser (Chrome or Brave). "
+        "Use ONLY when the user explicitly specifies an external destination: "
+        "1. 'play in youtube music' / 'youtube music pe chalao': action='play', service='youtube_music' (plays on YouTube Music in Chrome). "
+        "2. 'play in youtube' / 'youtube pe chalao': action='play', service='youtube', browser='chrome' (plays on regular YouTube in Chrome). "
+        "3. 'play in brave youtube' / 'brave mein play karo': action='play', browser='brave' (plays on YouTube in Brave browser). "
+        "Also used for: searching YouTube ('search'), summarizing transcripts ('summarize'), getting video info ('get_info'), or trending videos ('trending'). "
+        "Do NOT call this tool for generic 'play the song' commands (use video_player for in-app screen playback)."
+    ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "play | search | summarize | get_info | trending (default: play)"
+                "description": "play | search | summarize | get_info | trending (default: play)",
+                "enum": ["play", "search", "summarize", "get_info", "trending"]
             },
             "query": {
                 "type": "STRING",
-                "description": "Search query for play or search action"
+                "description": "Search query or song/video title to play"
+            },
+            "service": {
+                "type": "STRING",
+                "description": "'youtube' (default) or 'youtube_music' (when user specifically requests YouTube Music)",
+                "enum": ["youtube", "youtube_music"]
+            },
+            "browser": {
+                "type": "STRING",
+                "description": "'chrome' (default) or 'brave' (when user specifically requests Brave browser)",
+                "enum": ["chrome", "brave"]
             },
             "save": {
                 "type": "BOOLEAN",
@@ -483,11 +509,11 @@ TOOL = {
             },
             "region": {
                 "type": "STRING",
-                "description": "Country code for trending e.g. TR, US"
+                "description": "Country code for trending e.g. TR, US, IN"
             },
             "url": {
                 "type": "STRING",
-                "description": "Video URL for get_info action"
+                "description": "Video URL for get_info or summarize action"
             }
         },
         "required": []

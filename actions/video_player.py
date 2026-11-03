@@ -286,44 +286,30 @@ def _say(player, instruction: str) -> None:
 TOOL = {
     "name": "video_player",
     "description": (
-        "If user wants to open a video on YouTube, he will tell you that specifically"
-        "If user wants to play a video, then he wants to call this feature"
-        "Plays a VIDEO on the assistant's own display, where the avatar "
-        "normally is — and stops it, mutes it or unmutes it. Use whenever the "
-        "user wants to WATCH something on screen: 'play the new Dune trailer', "
-        "'play that video', 'play C:/clips/holiday.mp4', 'put that YouTube "
-        "video on the screen', 'stop the video', 'videoyu kapat', 'turn the "
-        "sound on', 'sesi aç', 'mute it'. Accepts a local file path, a direct "
-        "video URL, a YouTube link, or a description to search YouTube for. "
-        "Video always starts MUTED — only call action='unmute' when the user "
-        "actually asks to hear it. "
-        "This returns the moment it is asked, before the picture appears: when "
-        "it answers 'status=opening', say in one short sentence that you are "
-        "putting it on the display, and do not wait or call it again. "
-        "Do NOT use 'youtube_video' for this: that optional plugin opens videos "
-        "in the web browser and summarises transcripts, it never plays anything "
-        "on the assistant's display."
+        "DEFAULT MUSIC & VIDEO PLAYER (IN-APP SCREEN): Plays songs, music tracks, and videos directly on the assistant's own display (JARVIS app screen where the avatar is) with sound and synchronized lyrics/captions in the bottom panel! "
+        "USE THIS TOOL BY DEFAULT whenever the user says 'play the song [name]', 'play [song]', 'play music', 'gana chalao', 'chalao [song]', 'play [video]', 'watch [video]', or asks to play any track/song WITHOUT naming an external service. "
+        "Also used to stop, pause, mute, or unmute: action='stop' ('band karo', 'close video', 'stop song'), action='mute', action='unmute'. "
+        "Accepts a song name, track title, artist name, YouTube link, direct media URL, or local file. "
+        "Returns 'status=opening' immediately while resolving and streaming in the background — confirm in one short natural sentence that you are playing it on the screen. "
+        "Do NOT call this tool if user explicitly asks for an external service like 'in YouTube Music', 'in YouTube browser', or 'in Brave' (use youtube_video for those)."
     ),
     # Used in place of `description` only when a small model is on a tool
     # budget - Gemini still gets the full text. See providers/schema.py.
     "brief": (
-        "Plays a video on the HUD - a YouTube link, a local file, a URL, or a description to search for."
+        "Plays songs, music, and videos on the JARVIS in-app screen with synchronized captions/lyrics."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": ("'play' (default), 'stop' to close it, 'unmute' "
-                                "to turn the sound on, 'mute' to silence it."),
+                "description": "'play' (default), 'stop', 'mute', 'unmute'",
                 "enum": ["play", "stop", "mute", "unmute"],
             },
             "source": {
                 "type": "STRING",
                 "description": (
-                    "For action='play': a local file path, a direct video URL, "
-                    "a YouTube link, or what to search YouTube for. Pass what "
-                    "the user actually named, in their own words."
+                    "Song name, music title, search query, YouTube link, or file path to play on the JARVIS app screen."
                 ),
             },
         },
