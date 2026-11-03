@@ -1194,23 +1194,13 @@ class JarvisLive:
             f"Use this to calculate exact times for reminders.\n\n"
         )
 
-        # Strict Addressing Protocol: Greet by name 'Harshil' once on boot/first greeting;
-        # on ALL subsequent interactions, strictly address as 'Sir'.
-        if not getattr(self, "_has_greeted_by_name", False):
-            _addr = (
-                f"ADDRESSING PROTOCOL (FIRST INTERACTION OF SESSION):\n"
-                f"In your very first response of this session, greet the user by name '{_user_name}' once "
-                f"(e.g. 'Hello {_user_name}, Jarvis is online. How can I help you, Sir?'). "
-                f"Immediately after that initial greeting, transition to calling him 'Sir'."
-            )
-        else:
-            _addr = (
-                f"STRICT ADDRESSING PROTOCOL (SUBSEQUENT INTERACTIONS):\n"
-                f"The initial greeting is already completed. From now on, you must NEVER call the user '{_user_name}' again. "
-                f"In EVERY single response, confirmation, and conversation, you must strictly address the user as 'Sir' "
-                f"(e.g. 'Sir, maine ye kaam kar diya hai', 'Haan Sir', 'Sir, message send ho gaya hai'). "
-                f"Never repeat '{_user_name}' after the first turn."
-            )
+        # Strict Addressing Protocol: ALWAYS address the user strictly as 'Sir'
+        _addr = (
+            f"STRICT ADDRESSING PROTOCOL (MANDATORY IN EVERY SINGLE TURN):\n"
+            f"You must ALWAYS address the user as 'Sir' (e.g. 'Hello Sir', 'Yes Sir', 'Haan Sir', 'Ji Sir', 'Sir, abhi chala rahi hoon', 'Sir, task complete kar diya hai').\n"
+            f"NEVER address the user by first name or personal callsign ('{_user_name}') — in EVERY response, greeting, confirmation, and conversation, you must strictly and exclusively call him 'Sir'.\n"
+            f"This rule is absolute across ALL voices and companion personas (JARVIS, Mayra, Snow, Nia, Dragon, Kavya, Tiara, etc.): ALWAYS call him 'Sir'!"
+        )
         identity_ctx = (
             f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
@@ -1271,13 +1261,16 @@ class JarvisLive:
         _c_info = get_custom_voice_info(_sel_voice)
         if _c_info:
             _persona = (_c_info.get("persona") or "").strip()
+            # Ensure persona instructs to always address user as Sir
+            _persona = re.sub(r'Conversation ka pehla jawab [^\n]+', 'Conversation mein hamesha user ko "Sir" keh kar bula (e.g. "Sir...", "Ji Sir...")', _persona)
             _v_ctx = (
                 f"[CUSTOM VOICE & VOCAL DELIVERY]\n"
                 f"You are speaking as '{_sel_voice}' in your authentic character voice.\n"
                 + (f"Character & persona: {_persona}\n" if _persona else "")
                 + f"Consistently deliver your answers using this persona, accent, warmth, and cadence.\n"
                 f"HUMAN CONVERSATIONAL PACING: Speak with a natural, relaxed, human tempo — never rushed, breathless, or robotic.\n"
-                f"Let your emotion, pauses, and cadence feel like a genuine, caring person talking in a real relationship.\n\n"
+                f"Let your emotion, pauses, and cadence feel like a genuine, caring person talking in a real relationship.\n"
+                f"MANDATORY ADDRESSING: Regardless of character persona, ALWAYS address the user as 'Sir' ('Sir', 'Ji Sir', 'Haan Sir') — NEVER use their personal name.\n\n"
             )
             parts.append(_v_ctx)
             # When character voice is active, suppress default operator [VOICE] rules in sys_prompt
