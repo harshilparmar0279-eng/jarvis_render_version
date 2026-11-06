@@ -489,6 +489,19 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "sleep_assistant",
+        "description": (
+            "Puts JARVIS into sleep / silent standby mode. "
+            "Call this when the user explicitly commands: 'go to sleep', 'sleep', 'so jao', "
+            "'sleep mode', 'silent ho jao', or tells JARVIS to stay silent until called again. "
+            "The user can say this in ANY language."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {},
+        }
+    },
+    {
         "name": "save_memory",
         "description": (
             "Save an important personal fact about the user to long-term memory. "
@@ -803,17 +816,24 @@ class JarvisLive:
         self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
 
     async def _run_sleep_watch(self) -> None:
-        """Auto-sleep after the configured silence window (wake-word mode only)."""
+        """Keep continuous communication flow. Never auto-sleep while media is playing
+        or during active conversational flow unless explicitly commanded by the user."""
         while True:
             await asyncio.sleep(5)
             if not self._wake_enabled or not self._awake:
                 continue
+            # While music/video media is playing, NEVER auto-sleep — keep flow alive
+            if hasattr(self, "ui") and hasattr(self.ui, "is_media_playing") and self.ui.is_media_playing():
+                self._last_user_speech = time.monotonic()
+                continue
             with self._speaking_lock:
                 speaking = self._is_speaking
             if speaking:
+                self._last_user_speech = time.monotonic()
                 continue
-            if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
-                self.sleep(reason="no speech for 2 minutes")
+            # Maintain continuous conversational flow without abrupt auto-cutoff.
+            # Stay active and ready to communicate until the user explicitly commands
+            # sleep or shutdown ("Whenever when I'm not call you off you shut down like silent you").
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
@@ -1558,6 +1578,11 @@ class JarvisLive:
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
 
+            elif name == "sleep_assistant":
+                self.ui.write_log("SYS: Sleep mode requested by user.")
+                self.sleep(reason="user commanded sleep")
+                return "Going to sleep now, Sir. You can wake me anytime by saying 'Hey Jarvis' or tapping wake."
+
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
                 if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
@@ -1855,6 +1880,7 @@ class JarvisLive:
             while True:
                 async for response in self.session.receive():
                     self._clear_stall()
+                    self._resume_failures = 0
 
                     # ── GoAway & Server Reconnect Warning ────────────────────
                     if getattr(response, "go_away", None):
@@ -2670,14 +2696,21 @@ class JarvisLive:
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
                     # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Hey Jarvis" or taps wake in the UI.
+                    # only on initial cold boot until the user says "Hey Jarvis" or taps wake in the UI.
                     if self._wake_enabled:
                         self._ensure_wake_detector()
-                        if not _resumed_with:
-                            self._awake = False
-                            self.ui.set_state("SLEEPING")
-                            self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
+                        if not getattr(self, "_has_connected_once", False):
+                            self._has_connected_once = True
+                            if not _resumed_with:
+                                self._awake = False
+                                self.ui.set_state("SLEEPING")
+                                self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
+                            else:
+                                self._awake = True
+                                self.ui.set_state("LISTENING")
+                                self.ui.write_log("SYS: Continuous session restored — ready.")
                         else:
+                            # Reconnected during an existing session: maintain flow!
                             self._awake = True
                             self.ui.set_state("LISTENING")
                             self.ui.write_log("SYS: Continuous session restored — ready.")
@@ -2791,6 +2824,12 @@ class JarvisLive:
 
                 # 2. Normal WebSocket lifecycle cycling (GoAway / clean disconnect)
                 if any(k in err_str.lower() for k in ("goaway", "connectionclosed")) or ("1008" in err_str and "not found" not in err_str.lower() and "quota" not in err_str.lower()):
+                    if _resumed_with:
+                        self._resume_failures = getattr(self, "_resume_failures", 0) + 1
+                        if self._resume_failures >= 2:
+                            print("[JARVIS] 🔗 Resumption handle repeatedly rejected by server — discarding and starting fresh.")
+                            self._resume_handle = None
+                            self._resume_failures = 0
                     print(f"[JARVIS] 🔄 WebSocket connection cycled by server ({type(e).__name__}) — refreshing session")
                     self.ui.write_log("SYS: Refreshing connection — continuing conversation.")
                     self._conn_backoff = min(6, getattr(self, "_conn_backoff", 0) + 1)

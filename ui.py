@@ -5543,10 +5543,14 @@ class MainWindow(QMainWindow):
         try:
             if getattr(self, "_video_on", False):
                 from PyQt6.QtMultimedia import QMediaPlayer
-                aud = self._video_sound_out if self._video_split else self._video_audio
+                aud = self._video_sound_out if getattr(self, "_video_split", False) else self._video_audio
                 sound_on = bool(aud and not aud.isMuted())
-                if sound_on and self._video_player and self._video_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-                    return True
+                if sound_on:
+                    if getattr(self, "_video_split", False):
+                        if self._video_sound and self._video_sound.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                            return True
+                    if self._video_player and self._video_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                        return True
         except Exception:
             pass
         return False
@@ -5563,27 +5567,26 @@ class MainWindow(QMainWindow):
             self.write_log("SYS: Media quiet — standard microphone restored.")
 
     def _sync_video_sound(self) -> None:
-        """Keep the separate soundtrack in step with the picture.
+        """Keep picture in step with the soundtrack.
 
-        Two players started at the same moment do not stay together: they buffer
-        independently, and measured on a real stream they were about half a
-        second apart after nine seconds. So the sound is nudged back to the
-        picture whenever it drifts far enough to hear — and only then, because
-        correcting a smaller gap is itself audible.
+        Audio is the master track for music playback. If video drifts behind or ahead,
+        adjust the video player to match audio rather than seeking audio, avoiding
+        audio skips, stutter, or stream socket drops.
         """
         if not (self._video_split and self._video_sound and self._video_player):
             return
         try:
-            if self._video_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            from PyQt6.QtMultimedia import QMediaPlayer
+            if self._video_sound.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                 return
-            if self._video_sound.mediaStatus() in (
+            if self._video_player.mediaStatus() in (
                 QMediaPlayer.MediaStatus.BufferingMedia,
                 QMediaPlayer.MediaStatus.LoadingMedia,
             ):
                 return
-            drift = self._video_sound.position() - self._video_player.position()
+            drift = self._video_player.position() - self._video_sound.position()
             if abs(drift) > 1500:
-                self._video_sound.setPosition(self._video_player.position())
+                self._video_player.setPosition(self._video_sound.position())
         except Exception:
             pass
 
@@ -5599,21 +5602,69 @@ class MainWindow(QMainWindow):
 
     def _on_video_media_status_changed(self, status) -> None:
         try:
-            if HAVE_VIDEO and QMediaPlayer is not None and status == QMediaPlayer.MediaStatus.EndOfMedia:
-                self.write_log("SYS: Media playback ended. Restoring JARVIS HUD interface...")
-                self._on_video_close()
-                self.set_state("LISTENING")
-                if callable(getattr(self, "on_media_finished", None)):
-                    self.on_media_finished()
-        except Exception:
-            pass
+            if not (HAVE_VIDEO and QMediaPlayer is not None and status == QMediaPlayer.MediaStatus.EndOfMedia):
+                return
+
+            sender = self.sender()
+
+            # When video and audio are split (standard for YouTube streaming):
+            if getattr(self, "_video_split", False):
+                # 1. If visual track (_video_player) reaches end of stream,
+                # do NOT stop the song! The soundtrack (_video_sound) is the master track.
+                if sender == self._video_player:
+                    return
+
+                # 2. If the soundtrack (_video_sound) reaches EndOfMedia:
+                if sender == self._video_sound:
+                    dur = self._video_sound.duration()
+                    pos = self._video_sound.position()
+                    # If duration is known (> 5s) and position is still far from the end (> 3s remaining),
+                    # this is a premature stream EOF/network hiccup — DO NOT close!
+                    if dur > 5000 and pos < (dur - 3000):
+                        print(f"[Video] Premature audio stream EOF at {pos}ms/{dur}ms — attempting to keep playing")
+                        try:
+                            self._video_sound.play()
+                        except Exception:
+                            pass
+                        return
+            else:
+                # Combined single-stream playback (local file or combined URL):
+                dur = self._video_player.duration() if self._video_player else 0
+                pos = self._video_player.position() if self._video_player else 0
+                if dur > 5000 and pos < (dur - 3000):
+                    print(f"[Video] Premature stream EOF at {pos}ms/{dur}ms — attempting to keep playing")
+                    try:
+                        self._video_player.play()
+                    except Exception:
+                        pass
+                    return
+
+            self.write_log("SYS: Media playback ended. Restoring JARVIS HUD interface...")
+            self._on_video_close()
+            self.set_state("LISTENING")
+            if callable(getattr(self, "on_media_finished", None)):
+                self.on_media_finished()
+        except Exception as e:
+            print(f"[Video] media status changed error: {e}")
 
     def _on_video_error(self, *_a) -> None:
         err = ""
         try:
-            err = self._video_player.errorString()
+            err = self._video_player.errorString() if self._video_player else ""
         except Exception:
             pass
+
+        # If audio soundtrack is actively playing in split mode, do not abort the song on visual errors
+        if getattr(self, "_video_split", False) and getattr(self, "_video_on", False):
+            if self._video_sound and self._video_sound.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                print(f"[Video] Video track error ignored while song audio is playing: {err}")
+                return
+
+        # If already playing and position > 0, do not abruptly kill playback on non-fatal stream glitches
+        if getattr(self, "_video_on", False) and self._video_player and self._video_player.position() > 1000:
+            print(f"[Video] Non-fatal streaming error ignored during active playback: {err}")
+            return
+
         self.write_log(f"SYS: The video could not be played{(' — ' + err) if err else ''}.")
         self._on_video_close()
 
@@ -6937,6 +6988,8 @@ class MainWindow(QMainWindow):
     def _on_lyrics_seek(self, time_sec: float):
         if hasattr(self, "_video_player") and self._video_player:
             self._video_player.setPosition(int(time_sec * 1000))
+        if hasattr(self, "_video_sound") and self._video_sound and getattr(self, "_video_split", False):
+            self._video_sound.setPosition(int(time_sec * 1000))
 
     def _on_lyrics_playback_speed(self, speed: float):
         rate = float(speed)

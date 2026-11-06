@@ -234,5 +234,85 @@ class TestResourceGuardianOpaqueUI(unittest.TestCase):
         self.assertNotIn("rgba(", sheet, "ResourceDiagnosticsOverlay root stylesheet must NOT have translucent rgba")
 
 
+
+
+class TestContinuousFlowAndSongProtection(unittest.TestCase):
+    """Test full song playback protection and continuous communication flow."""
+
+    def test_sleep_assistant_tool_declared(self):
+        from main import TOOL_DECLARATIONS
+        names = [t.get("name") for t in TOOL_DECLARATIONS]
+        self.assertIn("sleep_assistant", names, "sleep_assistant tool must be declared in TOOL_DECLARATIONS")
+        self.assertIn("shutdown_jarvis", names, "shutdown_jarvis tool must be declared in TOOL_DECLARATIONS")
+
+    def test_is_media_playing_split_sound_active(self):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        mock_win = MagicMock()
+        mock_win._video_on = True
+        mock_win._video_split = True
+        mock_win._video_sound_out = MagicMock()
+        mock_win._video_sound_out.isMuted.return_value = False
+        mock_win._video_audio = MagicMock()
+        mock_win._video_sound = MagicMock()
+        mock_win._video_sound.playbackState.return_value = QMediaPlayer.PlaybackState.PlayingState
+        mock_win._video_player = MagicMock()
+        # Even if video player is stopped or paused, song sound playing must return True
+        mock_win._video_player.playbackState.return_value = QMediaPlayer.PlaybackState.StoppedState
+
+        from ui import MainWindow
+        result = MainWindow.is_media_playing(mock_win)
+        self.assertTrue(result, "is_media_playing must return True when soundtrack is actively playing in split mode")
+
+    def test_video_track_eof_does_not_abort_song(self):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        mock_win = MagicMock()
+        mock_win._video_split = True
+        mock_win._video_player = MagicMock()
+        mock_win._video_sound = MagicMock()
+        mock_win.sender.return_value = mock_win._video_player
+        mock_win._on_video_close = MagicMock()
+
+        from ui import MainWindow
+        MainWindow._on_video_media_status_changed(mock_win, QMediaPlayer.MediaStatus.EndOfMedia)
+        mock_win._on_video_close.assert_not_called()
+
+    def test_premature_sound_eof_does_not_abort_song(self):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        mock_win = MagicMock()
+        mock_win._video_split = True
+        mock_win._video_player = MagicMock()
+        mock_win._video_sound = MagicMock()
+        mock_win.sender.return_value = mock_win._video_sound
+        # Song is 210s long, but stream glitched at 50s
+        mock_win._video_sound.duration.return_value = 210000
+        mock_win._video_sound.position.return_value = 50000
+        mock_win._on_video_close = MagicMock()
+
+        from ui import MainWindow
+        MainWindow._on_video_media_status_changed(mock_win, QMediaPlayer.MediaStatus.EndOfMedia)
+        mock_win._on_video_close.assert_not_called()
+        mock_win._video_sound.play.assert_called_once()
+
+    def test_genuine_sound_eof_closes_cleanly(self):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        mock_win = MagicMock()
+        mock_win._video_split = True
+        mock_win._video_player = MagicMock()
+        mock_win._video_sound = MagicMock()
+        mock_win.sender.return_value = mock_win._video_sound
+        # Song is 210s long, finished at 209s
+        mock_win._video_sound.duration.return_value = 210000
+        mock_win._video_sound.position.return_value = 209000
+        mock_win._on_video_close = MagicMock()
+        mock_win.write_log = MagicMock()
+        mock_win.set_state = MagicMock()
+        mock_win.on_media_finished = None
+
+        from ui import MainWindow
+        MainWindow._on_video_media_status_changed(mock_win, QMediaPlayer.MediaStatus.EndOfMedia)
+        mock_win._on_video_close.assert_called_once()
+        mock_win.set_state.assert_called_with("LISTENING")
+
+
 if __name__ == "__main__":
     unittest.main()
