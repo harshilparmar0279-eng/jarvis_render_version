@@ -38,7 +38,10 @@ APP_ALIASES = {
     "google chrome": "chrome",
     "vlc": "vlc",
     "spotify": "spotify",
-    "whatsapp": "whatsapp",
+    "whatsapp": "whatsapp:",
+    "whatsapp desktop": "whatsapp:",
+    "wp": "whatsapp:",
+    "wapp": "whatsapp:",
 }
 
 
@@ -120,6 +123,19 @@ def find_local_target(query: str) -> Optional[Path]:
 
                     # Ignore code scripts and internal app files unless requested with exact extension
                     if ext_lower in (".py", ".pyc", ".pyo", ".pyd", ".git", ".log", ".tmp") and not q.endswith(ext_lower):
+                        continue
+
+                    # Ignore image, audio, and video media files when searching for applications
+                    MEDIA_EXTENSIONS = (
+                        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".tiff",
+                        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm",
+                        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a",
+                    )
+                    if ext_lower in MEDIA_EXTENSIONS and not any(q.endswith(me) for me in MEDIA_EXTENSIONS):
+                        continue
+
+                    # Never match WhatsApp image/video/audio downloads when searching for WhatsApp app
+                    if "whatsapp" in q and ("whatsappimage" in stem_lower or "whatsapp video" in stem_lower or "whatsapp audio" in stem_lower):
                         continue
 
                     # Exact matches

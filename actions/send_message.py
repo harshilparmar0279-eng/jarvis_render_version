@@ -178,6 +178,15 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     )
 
 def _send_whatsapp(receiver: str, message: str) -> str:
+    """WhatsApp routes through whatsapp_actions for verified typing and user confirmation."""
+    try:
+        from actions.whatsapp_actions import whatsapp_actions
+        return whatsapp_actions(parameters={"action": "send_message", "contact_name": receiver, "message": message})
+    except Exception as e:
+        print(f"[SendMessage] whatsapp_actions delegation failed ({e}) — typing blind.")
+        return _desktop_send("WhatsApp", receiver, message)
+
+def _send_whatsapp_legacy(receiver: str, message: str) -> str:
     """WhatsApp goes through the verified driver when there is one.
 
     _desktop_send below is a sequence of keystrokes with sleeps between them:

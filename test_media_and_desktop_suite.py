@@ -314,5 +314,79 @@ class TestContinuousFlowAndSongProtection(unittest.TestCase):
         mock_win.set_state.assert_called_with("LISTENING")
 
 
+
+
+class TestWhatsAppAutomationSuite(unittest.TestCase):
+    """Unit tests for WhatsApp application launching, calling, and message confirmation."""
+
+    def test_find_local_target_whatsapp_not_image(self):
+        from core.local_launcher import find_local_target
+        target = find_local_target("WhatsApp")
+        self.assertIsNotNone(target)
+        self.assertEqual(str(target), "whatsapp:", "find_local_target('WhatsApp') must return 'whatsapp:' protocol, NOT an image!")
+        self.assertNotIn(".jpeg", str(target).lower())
+        self.assertNotIn(".jpg", str(target).lower())
+
+    def test_open_app_whatsapp_routes_to_app(self):
+        from actions.open_app import open_app
+        with patch("plugins._whatsapp_core.get") as mock_get:
+            mock_driver = MagicMock()
+            mock_get.return_value = (mock_driver, "ok")
+            res = open_app(parameters={"app_name": "WhatsApp"})
+            mock_driver.ensure_open.assert_called_once()
+            self.assertIn("WhatsApp", res)
+
+    def test_whatsapp_actions_open_application(self):
+        from actions.whatsapp_actions import whatsapp_actions
+        with patch("plugins._whatsapp_core.get") as mock_get:
+            mock_driver = MagicMock()
+            mock_get.return_value = (mock_driver, "ok")
+            res = whatsapp_actions(parameters={"action": "open"})
+            mock_driver.ensure_open.assert_called_once()
+            self.assertIn("Opened WhatsApp application", res)
+
+    def test_whatsapp_audio_call_default_priority(self):
+        from actions.whatsapp_actions import whatsapp_actions
+        with patch("plugins._whatsapp_core.get") as mock_get:
+            mock_driver = MagicMock()
+            mock_driver.initiate_call.return_value = (True, "Ringing")
+            mock_get.return_value = (mock_driver, "ok")
+            res = whatsapp_actions(parameters={"action": "audio_call", "contact_name": "Alex"})
+            mock_driver.initiate_call.assert_called_once_with("Alex", video=False)
+            self.assertIn("audio_call", res)
+
+    def test_whatsapp_video_call_explicit(self):
+        from actions.whatsapp_actions import whatsapp_actions
+        with patch("plugins._whatsapp_core.get") as mock_get:
+            mock_driver = MagicMock()
+            mock_driver.initiate_call.return_value = (True, "Ringing")
+            mock_get.return_value = (mock_driver, "ok")
+            res = whatsapp_actions(parameters={"action": "video_call", "contact_name": "Alex"})
+            mock_driver.initiate_call.assert_called_once_with("Alex", video=True)
+            self.assertIn("video_call", res)
+
+    def test_whatsapp_send_message_requires_confirmation(self):
+        from actions.whatsapp_actions import whatsapp_actions
+        with patch("plugins._whatsapp_core.get") as mock_get,              patch("core.confirm.request") as mock_confirm:
+            mock_driver = MagicMock()
+            mock_driver.prepare_message.return_value = (True, "Pasted")
+            mock_get.return_value = (mock_driver, "ok")
+            res = whatsapp_actions(parameters={"action": "send_message", "contact_name": "Alex", "message": "Hello"})
+            mock_driver.prepare_message.assert_called_once_with("Alex", "Hello")
+            mock_confirm.assert_called_once()
+            self.assertIn("[CONFIRMATION_PENDING]", res)
+            self.assertIn("Sir", res)
+
+    def test_whatsapp_confirm_send_sends_message(self):
+        from actions.whatsapp_actions import whatsapp_actions
+        with patch("plugins._whatsapp_core.get") as mock_get:
+            mock_driver = MagicMock()
+            mock_driver.send_typed_message.return_value = (True, "Sent")
+            mock_get.return_value = (mock_driver, "ok")
+            res = whatsapp_actions(parameters={"action": "confirm_send"})
+            mock_driver.send_typed_message.assert_called_once()
+            self.assertIn("Message sent successfully", res)
+
+
 if __name__ == "__main__":
     unittest.main()

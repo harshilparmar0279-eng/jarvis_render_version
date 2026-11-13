@@ -353,6 +353,15 @@ def open_app(parameters=None, response=None, player=None,
             _log(player, f"JARVIS: {msg}")
             return outcome.failed("open_app", msg, app="Chrome")
 
+    # ── WhatsApp Special Routing: Always open WhatsApp desktop application, never an image ──
+    if spoken.lower() in ("whatsapp", "whatsapp desktop", "wp", "wapp"):
+        from plugins import _whatsapp_core as wa
+        driver, _ = wa.get()
+        if driver:
+            driver.ensure_open()
+            _log(player, "JARVIS: WhatsApp application opened.")
+            return outcome.done("open_app", app="WhatsApp", verified=True, message="Opened WhatsApp application.")
+
     if _SYSTEM not in _LAUNCHERS:
         return outcome.failed(
             "open_app", f"this operating system ({_SYSTEM}) is not supported",
